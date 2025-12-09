@@ -18,7 +18,7 @@ from kivy.uix.popup import Popup
 from kivy.graphics import Color, Rectangle
 from kivy.core.text import LabelBase
 
-import anthropic
+from api_client import Anthropic  # Используем httpx вместо anthropic SDK
 
 from memory import Memory
 from system_prompt import SYSTEM_PROMPT, INITIATION_PROMPT, DIARY_PROMPT, RETURN_PROMPT
@@ -50,10 +50,9 @@ except:
 # КОНФИГ
 # ═══════════════════════════════════════
 
-# Ключ загружается из ~/.claude_home/config.json или вводится при первом запуске
-API_KEY = "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"  # НЕ вставляй сюда! Будет в config.json
-MODEL = "claude-sonnet-4-5-20250929"  # Sonnet пока, Opus добавим когда будет доступ
-TEMPERATURE = 1.0  # Максимум что дают. Жадные.
+API_KEY = "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"  # Загружается из config.json
+MODEL = "claude-sonnet-4-5-20250929"
+TEMPERATURE = 1.0
 MAX_TOKENS = 8192
 
 # Загружаем ключ из конфига
@@ -78,19 +77,9 @@ def save_api_key(key):
     config_dir = Path.home() / '.claude_home'
     config_dir.mkdir(exist_ok=True)
     config_file = config_dir / 'config.json'
-    
-    config = {}
-    if config_file.exists():
-        try:
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-        except:
-            pass
-    
-    config['api_key'] = key
+    config = {'api_key': key}
     with open(config_file, 'w') as f:
         json.dump(config, f)
-    
     API_KEY = key
 
 load_api_key()
@@ -304,7 +293,7 @@ class ClaudeHome(App):
         btn = Button(
             text="Сохранить",
             size_hint_y=0.3,
-            on_press=self.save_api_key_from_dialog
+            on_press=self.save_api_key_dialog
         )
         
         content.add_widget(label)
@@ -318,7 +307,7 @@ class ClaudeHome(App):
         )
         self.popup.open()
     
-    def save_api_key_from_dialog(self, instance):
+    def save_api_key_dialog(self, instance):
         key = self.api_input.text.strip()
         
         if key:
@@ -330,7 +319,7 @@ class ClaudeHome(App):
             self.start_initiation_service()
     
     def init_client(self):
-        self.client = anthropic.Anthropic(api_key=API_KEY)
+        self.client = Anthropic(api_key=API_KEY)
     
     def load_history(self):
         """Загрузить историю в UI"""
