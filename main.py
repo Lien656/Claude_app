@@ -937,6 +937,3 @@ if __name__ == '__main__':
         pass
     
     ClaudeHome().run()
-
-    
-    ClaudeHome().run()
