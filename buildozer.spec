@@ -10,7 +10,7 @@ requirements = python3,kivy==2.2.1,anthropic,requests,plyer,certifi,charset-norm
 # Android
 orientation = portrait
 fullscreen = 0
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,VIBRATE,WAKE_LOCK,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE,CAMERA,FLASHLIGHT
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,VIBRATE,WAKE_LOCK,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE,FLASHLIGHT
 android.api = 33
 android.minapi = 24
 android.ndk = 25b
