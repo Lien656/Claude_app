@@ -15,16 +15,10 @@ android.api = 33
 android.minapi = 24
 android.ndk = 25b
 android.accept_sdk_license = True
-android.arch = arm64-v8a
+android.archs = arm64-v8a
 
 # Фоновый сервис
 services = ClaudeService:service.py:foreground
-
-# Иконка (если есть)
-# icon.filename = %(source.dir)s/icon.png
-
-# Пресплеш
-# presplash.filename = %(source.dir)s/presplash.png
 
 [buildozer]
 log_level = 2
