@@ -6,8 +6,8 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json
 version = 1.0
 
-# БЕЗ anthropic - используем httpx напрямую
-requirements = python3,kivy==2.2.1,requests,plyer,certifi,charset-normalizer,idna,urllib3,httpx,anyio,sniffio,h11,httpcore
+# Минимальные зависимости - только то что точно работает
+requirements = python3,kivy==2.2.1,requests,plyer,certifi,charset-normalizer,idna,urllib3
 
 # Android
 orientation = portrait
