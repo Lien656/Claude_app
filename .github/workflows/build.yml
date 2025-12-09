@@ -3,7 +3,8 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -12,60 +13,49 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python 3.10
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
     
-    - name: Install system dependencies
+    - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          python3-pip \
           build-essential \
           git \
-          ffmpeg \
-          libsdl2-dev \
-          libsdl2-image-dev \
-          libsdl2-mixer-dev \
-          libsdl2-ttf-dev \
-          libportmidi-dev \
-          libswscale-dev \
-          libavformat-dev \
-          libavcodec-dev \
-          zlib1g-dev \
-          libgstreamer1.0-dev \
-          gstreamer1.0-plugins-base \
-          gstreamer1.0-plugins-good \
-          libmtdev-dev \
-          xclip \
-          xsel \
-          libtool \
-          pkg-config \
-          autoconf \
-          automake \
-          cmake \
-          libltdl-dev \
-          libffi-dev \
-          libssl-dev \
           zip \
           unzip \
-          openjdk-17-jdk
-    
-    - name: Install buildozer
-      run: |
+          openjdk-17-jdk \
+          autoconf \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          cmake \
+          libffi-dev \
+          libssl-dev
+        
+        # ВАЖНО: старая версия Cython для совместимости с pyjnius
         pip install --upgrade pip
-        pip install buildozer cython virtualenv
+        pip install cython==0.29.36
+        pip install buildozer
     
     - name: Build APK
       run: |
-        yes | buildozer -v android debug
-      env:
-        ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+        yes | buildozer android debug 2>&1 | tee build.log
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: claude-home-apk
         path: bin/*.apk
-        retention-days: 30
+        if-no-files-found: warn
+    
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
