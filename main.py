@@ -51,7 +51,7 @@ except:
 # ═══════════════════════════════════════
 
 API_KEY = "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"  # Загружается из config.json
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = "claude-sonnet-4-5-20250929" 
 TEMPERATURE = 1.0
 MAX_TOKENS = 8192
 
