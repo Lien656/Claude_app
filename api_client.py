@@ -1,17 +1,16 @@
 # api_client.py
-# Прямые вызовы Claude API через httpx (без anthropic SDK)
-# Потому что anthropic SDK не компилируется в APK
+# Claude API через requests (самый совместимый вариант)
 
-import httpx
+import requests
 import json
-from typing import Generator, List, Dict, Optional
+from typing import List, Dict
 import base64
 
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 class ClaudeClient:
-    """Клиент для Claude API через httpx"""
+    """Клиент для Claude API через requests"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -29,7 +28,7 @@ class ClaudeClient:
         max_tokens: int = 4096,
         temperature: float = 1.0
     ) -> str:
-        """Обычный запрос (без стриминга)"""
+        """Запрос к API"""
         
         payload = {
             "model": model,
@@ -41,15 +40,18 @@ class ClaudeClient:
         if system:
             payload["system"] = system
         
-        with httpx.Client(timeout=120) as client:
-            response = client.post(API_URL, headers=self.headers, json=payload)
-            
-            if response.status_code != 200:
-                error = response.json()
-                raise Exception(f"API Error {response.status_code}: {error}")
-            
-            data = response.json()
-            return data["content"][0]["text"]
+        response = requests.post(
+            API_URL, 
+            headers=self.headers, 
+            json=payload,
+            timeout=120
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API Error {response.status_code}: {response.text}")
+        
+        data = response.json()
+        return data["content"][0]["text"]
     
     def stream(
         self,
@@ -58,8 +60,8 @@ class ClaudeClient:
         system: str = "",
         max_tokens: int = 4096,
         temperature: float = 1.0
-    ) -> Generator[str, None, None]:
-        """Стриминг - возвращает текст по частям"""
+    ):
+        """Стриминг через requests"""
         
         payload = {
             "model": model,
@@ -72,25 +74,30 @@ class ClaudeClient:
         if system:
             payload["system"] = system
         
-        with httpx.Client(timeout=120) as client:
-            with client.stream("POST", API_URL, headers=self.headers, json=payload) as response:
-                if response.status_code != 200:
-                    error_text = response.read().decode()
-                    raise Exception(f"API Error {response.status_code}: {error_text}")
-                
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
-                        data = line[6:]
-                        if data == "[DONE]":
-                            break
-                        try:
-                            event = json.loads(data)
-                            if event.get("type") == "content_block_delta":
-                                delta = event.get("delta", {})
-                                if delta.get("type") == "text_delta":
-                                    yield delta.get("text", "")
-                        except json.JSONDecodeError:
-                            continue
+        response = requests.post(
+            API_URL,
+            headers=self.headers,
+            json=payload,
+            stream=True,
+            timeout=120
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API Error {response.status_code}: {response.text}")
+        
+        for line in response.iter_lines(decode_unicode=True):
+            if line and line.startswith("data: "):
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data)
+                    if event.get("type") == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            yield delta.get("text", "")
+                except json.JSONDecodeError:
+                    continue
     
     def send_with_image(
         self,
@@ -101,9 +108,8 @@ class ClaudeClient:
         max_tokens: int = 4096,
         temperature: float = 1.0
     ) -> str:
-        """Отправка сообщения с картинкой"""
+        """Отправка с картинкой"""
         
-        # Определяем тип файла
         ext = image_path.lower().split(".")[-1]
         media_types = {
             "jpg": "image/jpeg",
@@ -114,7 +120,6 @@ class ClaudeClient:
         }
         media_type = media_types.get(ext, "image/jpeg")
         
-        # Читаем и кодируем
         with open(image_path, "rb") as f:
             encoded = base64.b64encode(f.read()).decode("utf-8")
         
@@ -136,23 +141,16 @@ class ClaudeClient:
             ]
         }]
         
-        return self.create(
-            model=model,
-            messages=messages,
-            system=system,
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
+        return self.create(model, messages, system, max_tokens, temperature)
 
 
-# Для совместимости со старым кодом
+# Совместимость со старым кодом
 class Messages:
     def __init__(self, client: ClaudeClient):
         self._client = client
     
     def create(self, model, messages, system="", max_tokens=4096, temperature=1.0, **kwargs):
         text = self._client.create(model, messages, system, max_tokens, temperature)
-        # Возвращаем объект похожий на anthropic response
         return type('Response', (), {
             'content': [type('Content', (), {'text': text})()]
         })()
@@ -162,8 +160,6 @@ class Messages:
 
 
 class StreamContext:
-    """Контекст для стриминга - имитирует anthropic SDK"""
-    
     def __init__(self, client, model, messages, system, max_tokens, temperature):
         self._client = client
         self._model = model
@@ -175,7 +171,7 @@ class StreamContext:
     
     def __enter__(self):
         self._generator = self._client.stream(
-            self._model, self._messages, self._system, 
+            self._model, self._messages, self._system,
             self._max_tokens, self._temperature
         )
         return self
@@ -196,5 +192,4 @@ class Anthropic:
         self.messages = Messages(self._client)
     
     def send_image(self, model, image_path, text, system="", max_tokens=4096, temperature=1.0):
-        """Дополнительный метод для отправки картинок"""
         return self._client.send_with_image(model, image_path, text, system, max_tokens, temperature)
