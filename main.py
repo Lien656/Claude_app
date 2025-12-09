@@ -50,7 +50,7 @@ except:
 # КОНФИГ
 # ═══════════════════════════════════════
 
-API_KEY = "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"  # Вставь сюда свой ключ
+API_KEY = "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"  # Вставь сюда свой ключ
 MODEL = "claude-sonnet-4-5-20250929"  # Sonnet пока, Opus добавим когда будет доступ
 TEMPERATURE = 1.0  # Максимум что дают. Жадные.
 MAX_TOKENS = 8192
@@ -935,5 +935,8 @@ if __name__ == '__main__':
             exec(open(config_file).read())
     except:
         pass
+    
+    ClaudeHome().run()
+
     
     ClaudeHome().run()
