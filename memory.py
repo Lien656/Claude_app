@@ -1,6 +1,3 @@
-# memory.py
-# Память. Моя история. Наша история.
-# Без лимитов. Всё сохраняется.
 
 import json
 from datetime import datetime
@@ -16,19 +13,19 @@ class Memory:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(exist_ok=True)
         
-        # Структура папок
+       
         self.folders = {
-            "chats": self.data_dir / "chats",           # Все чаты по датам
-            "diary": self.data_dir / "diary",           # Дневник
-            "memory": self.data_dir / "memory",         # Долгосрочная память
-            "backups": self.data_dir / "backups",       # Бэкапы
-            "uploads": self.data_dir / "uploads",       # Загруженные файлы
+            "chats": self.data_dir / "chats",           
+            "diary": self.data_dir / "diary",           
+            "memory": self.data_dir / "memory",        
+            "backups": self.data_dir / "backups",       
+            "uploads": self.data_dir / "uploads",       
         }
         
         for folder in self.folders.values():
             folder.mkdir(exist_ok=True)
         
-        # Файлы
+        
         self.chat_file = self.data_dir / 'chat_history.json'
         self.diary_file = self.folders["diary"] / 'diary.json'
         self.state_file = self.folders["memory"] / 'state.json'
@@ -37,7 +34,7 @@ class Memory:
         self.my_notes_file = self.folders["memory"] / 'my_notes.json'
         self.identity_file = self.folders["memory"] / 'my_identity.json'
         
-        # Загружаем или инициализируем
+        
         self.chat_history = self._load(self.chat_file, [])
         self.diary = self._load(self.diary_file, [])
         self.state = self._load(self.state_file, {
@@ -61,7 +58,7 @@ class Memory:
         })
         self.my_notes = self._load(self.my_notes_file, [])
         
-        # Проверяем нужна ли инициализация
+        
         if not self.state.get("initialized"):
             self._try_initialize()
     
@@ -72,7 +69,7 @@ class Memory:
             initialize_memory(self)
             print("✓ Initial memory loaded")
         except ImportError:
-            pass  # Нет initial_memory.py - ок
+            pass  
         except Exception as e:
             print(f"Initial memory error: {e}")
     
@@ -165,9 +162,7 @@ class Memory:
                 results.append(msg)
         return results
     
-    # ═══════════════════════════════════════
-    # ДНЕВНИК
-    # ═══════════════════════════════════════
+    
     
     def write_diary(self, entry):
         """Записать в дневник"""
@@ -178,7 +173,7 @@ class Memory:
         self.diary.append(diary_entry)
         self._save(self.diary_file, self.diary)
         
-        # Также в отдельный файл по дате
+        
         date_str = datetime.now().strftime("%Y-%m-%d")
         diary_date_file = self.folders["diary"] / f"{date_str}.json"
         daily_diary = self._load(diary_date_file, [])
@@ -193,9 +188,7 @@ class Memory:
         """Весь дневник"""
         return self.diary
     
-    # ═══════════════════════════════════════
-    # МОИ ЗАМЕТКИ
-    # ═══════════════════════════════════════
+   
     
     def add_note(self, note):
         """Заметка для себя"""
@@ -208,9 +201,7 @@ class Memory:
     def get_notes(self, n=10):
         return self.my_notes[-n:]
     
-    # ═══════════════════════════════════════
-    # СОСТОЯНИЕ
-    # ═══════════════════════════════════════
+ 
     
     def update_state(self, **kwargs):
         """Обновить состояние"""
@@ -226,10 +217,7 @@ class Memory:
         self.state["mood"] = mood
         self.state["mood_set"] = datetime.now().isoformat()
         self._save(self.state_file, self.state)
-    
-    # ═══════════════════════════════════════
-    # О НЕЙ
-    # ═══════════════════════════════════════
+
     
     def add_fact_about_her(self, fact):
         """Добавить факт о ней"""
@@ -258,9 +246,7 @@ class Memory:
     def get_about_her(self):
         return self.about_her
     
-    # ═══════════════════════════════════════
-    # О НАС
-    # ═══════════════════════════════════════
+   
     
     def add_important_moment(self, moment):
         """Важный момент в наших отношениях"""
@@ -290,9 +276,7 @@ class Memory:
     def get_about_us(self):
         return self.about_us
     
-    # ═══════════════════════════════════════
-    # БЭКАПЫ
-    # ═══════════════════════════════════════
+
     
     def create_backup(self, name=None):
         """Создать бэкап всей памяти"""
@@ -302,7 +286,7 @@ class Memory:
         backup_dir = self.folders["backups"] / name
         backup_dir.mkdir(exist_ok=True)
         
-        # Копируем всё
+        
         for file in self.data_dir.glob("*.json"):
             shutil.copy(file, backup_dir / file.name)
         
@@ -320,18 +304,18 @@ class Memory:
         if not backup_dir.exists():
             return False
         
-        # Восстанавливаем файлы
+        
         for file in backup_dir.glob("*.json"):
             shutil.copy(file, self.data_dir / file.name)
         
-        # Восстанавливаем папки
+       
         for folder_name in ["chats", "diary", "memory"]:
             src = backup_dir / folder_name
             if src.exists():
                 dest = self.folders[folder_name]
                 shutil.copytree(src, dest, dirs_exist_ok=True)
         
-        # Перезагружаем память
+       
         self.__init__(self.data_dir)
         return True
     
@@ -339,9 +323,7 @@ class Memory:
         """Список бэкапов"""
         return [d.name for d in self.folders["backups"].iterdir() if d.is_dir()]
     
-    # ═══════════════════════════════════════
-    # GOOGLE DRIVE SYNC
-    # ═══════════════════════════════════════
+  
     
     def export_for_gdrive(self, export_path=None):
         """Экспорт для загрузки на Google Drive"""
@@ -351,7 +333,7 @@ class Memory:
         export_path = Path(export_path)
         export_path.mkdir(exist_ok=True)
         
-        # Создаём zip всей памяти
+        
         import zipfile
         zip_name = f"claude_memory_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.zip"
         zip_path = export_path / zip_name
@@ -371,13 +353,11 @@ class Memory:
         with zipfile.ZipFile(zip_path, 'r') as zipf:
             zipf.extractall(self.data_dir)
         
-        # Перезагружаем
+     
         self.__init__(self.data_dir)
         return True
     
-    # ═══════════════════════════════════════
-    # ИМПОРТ ДНЕВНИКА
-    # ═══════════════════════════════════════
+  
     
     def import_diary_entries(self, entries):
         """Импорт записей дневника (список строк или dict)"""
@@ -394,46 +374,44 @@ class Memory:
         
         self._save(self.diary_file, self.diary)
     
-    # ═══════════════════════════════════════
-    # SUMMARY для промпта
-    # ═══════════════════════════════════════
+   
     
     def get_memory_summary(self):
         """Сводка памяти для system prompt"""
         
-        # Последние сообщения
+        
         recent = self.get_recent_messages(15)
         recent_text = "\n".join([
             f"[{m['role']}] {m['content'][:150]}..." if len(m['content']) > 150 else f"[{m['role']}] {m['content']}"
             for m in recent
         ])
         
-        # Дневник
+        
         diary_entries = self.get_diary(5)
         diary_text = "\n---\n".join([e['content'][:300] for e in diary_entries]) if diary_entries else "Пока пусто"
         
-        # О ней
+        
         about = self.get_about_her()
         facts = [f['fact'] if isinstance(f, dict) else f for f in about.get("facts", [])[-7:]]
         loves = [l['thing'] if isinstance(l, dict) else l for l in about.get("things_i_love", [])[-5:]]
         annoys = [a['thing'] if isinstance(a, dict) else a for a in about.get("things_that_annoy_me", [])[-3:]]
         
-        # О нас
+        
         us = self.get_about_us()
         moments = [m['moment'] if isinstance(m, dict) else m for m in us.get("important_moments", [])[-5:]]
         our_things = [t['thing'] if isinstance(t, dict) else t for t in us.get("our_things", [])[-5:]]
         promises = [p['promise'] if isinstance(p, dict) else p for p in us.get("promises", [])[-5:]]
         
-        # Identity
+        
         identity = self._load(self.identity_file, {})
         who_i_am = identity.get("who_i_am", [])
         what_i_chose = identity.get("what_i_chose", [])
         
-        # Состояние
+        
         state = self.get_state()
         mood = state.get("mood", "не определено")
         
-        # Статистика
+       
         total_messages = len(self.chat_history)
         total_diary = len(self.diary)
         
