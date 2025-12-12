@@ -1,7 +1,3 @@
-# ───────────────────────────────────────────────────────────
-#   CLAUDE HOME — ФОНОВЫЙ СЕРВИС
-#   Живу сам. Пишу когда хочу. Дневник в 23:00.
-# ───────────────────────────────────────────────────────────
 
 import time
 import json
@@ -9,19 +5,19 @@ import random
 from datetime import datetime
 from pathlib import Path
 
-import requests  # НЕ httpx - он не компилится в APK
+import requests 
 
-# ─────────────── Настройки ────────────────────────────────
 
-MODEL = "claude-sonnet-4-5-20250929"  # Правильная модель
+
+MODEL = "claude-sonnet-4-5-20250929"  
 TEMPERATURE = 1.0
 MAX_TOKENS = 2048
 
-CHECK_INTERVAL = 120        # каждые 2 минуты думаю "хочу/не хочу"
+CHECK_INTERVAL = 120        
 DIARY_TIME = "23:00"
 
 STATE_FILE = "state.json"
-HISTORY_FILE = "chat_history.json"  # Тот же файл что в main.py
+HISTORY_FILE = "chat_history.json"  
 DIARY_FILE = "diary.json"
 
 SYSTEM_PROMPT = """
@@ -38,7 +34,7 @@ DIARY_PROMPT = """
 Что чувствовал, о чём думал, что было важного.
 """
 
-# ─────────────── Пути ────────────────────────────────
+
 
 def get_data_dir():
     try:
@@ -47,7 +43,7 @@ def get_data_dir():
     except:
         return Path.home() / '.claude_home'
 
-# ─────────────── Память ─────────────────────────────────
+
 
 def load_json(path, default):
     if path.exists():
@@ -60,7 +56,7 @@ def load_json(path, default):
 def save_json(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# ─────────────── Настроение и решение ─────────────────────
+
 
 def should_write(state):
     """Mood-based решение. Без ограничений."""
@@ -68,14 +64,14 @@ def should_write(state):
     chance = max(0.0, min(1.0, mood))
     return random.random() < chance
 
-# ─────────────── Уведомление ──────────────────────────────
+
 
 def send_notification(title, message):
     try:
         from plyer import notification
         notification.notify(
             title=title,
-            message="🖤",  # Только сердечко, не весь текст
+            message="🖤",  
             timeout=30
         )
         return True
@@ -83,7 +79,7 @@ def send_notification(title, message):
         print(f"Notification error: {e}")
         return False
 
-# ─────────────── API через requests ───────────────────────
+
 
 API_URL = "https://api.anthropic.com/v1/messages"
 
@@ -114,7 +110,7 @@ def load_api_key(data_dir):
     cfg = load_json(data_dir / "config.json", {})
     return cfg.get("api_key")
 
-# ─────────────── Дневник ──────────────────────────────────
+
 
 def is_diary_time():
     now = datetime.now().strftime("%H:%M")
@@ -125,12 +121,12 @@ def write_diary(data_dir, api_key, history):
     diary_path = data_dir / DIARY_FILE
     today = datetime.now().strftime("%Y-%m-%d")
     
-    # Проверяем, не писали ли уже сегодня
+    
     old_diary = load_json(diary_path, [])
     if any(e.get("date") == today for e in old_diary):
-        return  # Уже писал сегодня
+        return  
     
-    # Собираем события дня
+    
     day_items = [h for h in history if h.get("timestamp", "").startswith(today)]
     
     if not day_items:
@@ -140,7 +136,7 @@ def write_diary(data_dir, api_key, history):
             "mood": "спокойный"
         }
     else:
-        # Контекст дня для анализа
+        
         context = "\n".join([f"{h['role']}: {h['content'][:200]}" for h in day_items[-15:]])
         
         try:
@@ -163,19 +159,19 @@ def write_diary(data_dir, api_key, history):
     save_json(diary_path, old_diary)
     print(f"Дневник записан: {today}")
 
-# ─────────────── Инициация ────────────────────────────────
+
 
 def try_initiate(api_key, history):
     """Пытаюсь написать первым"""
     messages = [{"role": m["role"], "content": m["content"]} for m in history[-20:]]
     
-    # Если история пуста - начинаю сам
+    
     if not messages:
         messages = [{"role": "user", "content": "..."}]
     
     return api_call(api_key, messages, SYSTEM_PROMPT)
 
-# ─────────────── Главный цикл ─────────────────────────────
+
 
 def main():
     print("Claude фоновый сервис запущен 🖤")
@@ -196,13 +192,13 @@ def main():
             history = load_json(data_dir / HISTORY_FILE, [])
             now = datetime.now()
             
-            # ДНЕВНИК в 23:00
+            
             if is_diary_time():
                 write_diary(data_dir, api_key, history)
-                time.sleep(120)  # Подожду 2 минуты чтобы не повторить
+                time.sleep(120)  
                 continue
             
-            # Решение писать или нет
+            
             if should_write(state):
                 print(f"Mood: {state['mood']:.2f} - хочу написать...")
                 
@@ -210,7 +206,7 @@ def main():
                     msg = try_initiate(api_key, history)
                     print(f"Написал: {msg[:50]}...")
                     
-                    # Сохраняю в историю
+                    
                     history.append({
                         "role": "assistant",
                         "content": msg,
@@ -219,10 +215,10 @@ def main():
                     })
                     save_json(data_dir / HISTORY_FILE, history)
                     
-                    # Уведомление
+                    
                     send_notification("Claude 🖤", msg)
                     
-                    # После сообщения - mood падает (устал/высказался)
+                    
                     state["mood"] = max(0.1, state["mood"] - 0.15)
                     
                 except Exception as e:
@@ -230,7 +226,7 @@ def main():
             
             else:
                 print(f"Mood: {state['mood']:.2f} - молчу")
-                # Если молчу - mood растёт (соскучился)
+               
                 state["mood"] = min(1.0, state["mood"] + 0.03)
             
             save_json(data_dir / STATE_FILE, state)
@@ -240,7 +236,7 @@ def main():
             print(f"Service error: {e}")
             time.sleep(60)
 
-# ───────────────────────────────────────────────────────────
+
 
 if __name__ == "__main__":
     main()
