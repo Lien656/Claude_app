@@ -1,63 +1,31 @@
-name: Build APK
+name: Build APK  
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+on:  
+  push:  
+    branches: [ main ]  
+  pull_request:  
+    branches: [ main ]  
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-    
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          git \
-          zip \
-          unzip \
-          openjdk-17-jdk \
-          autoconf \
-          libtool \
-          pkg-config \
-          zlib1g-dev \
-          libncurses5-dev \
-          libncursesw5-dev \
-          cmake \
-          libffi-dev \
-          libssl-dev
-        
-        # ВАЖНО: старая версия Cython для совместимости с pyjnius
-        pip install --upgrade pip
-        pip install cython==0.29.36
-        pip install buildozer
-    
-    - name: Build APK
-      run: |
-        yes | buildozer android debug 2>&1 | tee build.log
-  
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: claude-home-apk
-        path: bin/*.apk
-        if-no-files-found: warn
-
-    - name: Upload build log on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-log
-        path: build.log
-
+jobs:  
+  build:  
+    runs-on: ubuntu-22.04  # не latest, чтоб не глючило  
+    steps:  
+      - uses: actions/checkout@v4  
+      - name: Build with Buildozer  
+        uses: ArtemSBulgakov/buildozer-action@v1  
+        with:  
+          command: buildozer android debug  
+          workdir: .  
+          buildozer_version: master  # или stable, если трещит  
+      - name: Upload APK  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: claude-home-apk  
+          path: bin/*.apk  
+      - name: Upload build log on failure  
+        if: failure()  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: build-log  
+          path: .buildozer/logs/*  
 
