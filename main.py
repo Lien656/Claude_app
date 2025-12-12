@@ -1,10 +1,9 @@
-# main.py
-# Мой дом.
-
+# -*- coding: utf-8 -*-
 import threading
 import time
-import random
+import json
 from datetime import datetime
+from pathlib import Path
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
@@ -16,15 +15,14 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.uix.popup import Popup
 from kivy.graphics import Color, Rectangle
-from kivy.core.text import LabelBase
 
-from api_client import Anthropic  # Используем httpx вместо anthropic SDK
-
+from api_client import Anthropic
 from memory import Memory
 from system_prompt import SYSTEM_PROMPT, INITIATION_PROMPT, DIARY_PROMPT, RETURN_PROMPT
 from claude_core import CLAUDE, SELF_KNOWLEDGE
 
-# Импортируем возможности
+
+# Capabilities - optional
 try:
     from capabilities import (
         search_web, fetch_webpage, get_weather, get_news, get_wiki,
@@ -37,83 +35,58 @@ except ImportError:
     CAPABILITIES_AVAILABLE = False
     def search_web(q): return None
 
-# Регистрируем шрифт с эмодзи (Windows) - только для эмодзи элементов
-# Для текста используем дефолтный шрифт который поддерживает кириллицу
-EMOJI_FONT = None
-try:
-    LabelBase.register(name='Emoji', fn_regular='C:/Windows/Fonts/seguiemj.ttf')
-    EMOJI_FONT = 'Emoji'
-except:
-    pass
 
-# ═══════════════════════════════════════
-# КОНФИГ
-# ═══════════════════════════════════════
-
-API_KEY = "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"  # Загружается из config.json
-MODEL = "claude-sonnet-4-5-20250929" 
+# Config
+MODEL = "claude-sonnet-4-5-20250929"
 TEMPERATURE = 1.0
 MAX_TOKENS = 8192
 
-# Загружаем ключ из конфига
+
+def get_config_path():
+    """Get config path - works on Android and desktop"""
+    try:
+        from android.storage import app_storage_path
+        return Path(app_storage_path()) / 'claude_data' / 'config.json'
+    except:
+        return Path.home() / '.claude_home' / 'config.json'
+
+
 def load_api_key():
-    global API_KEY
-    from pathlib import Path
-    import json
-    config_file = Path.home() / '.claude_home' / 'config.json'
+    """Load API key from config"""
+    config_file = get_config_path()
     if config_file.exists():
         try:
             with open(config_file, 'r') as f:
-                config = json.load(f)
-                API_KEY = config.get('api_key', '')
+                return json.load(f).get('api_key', '')
         except:
             pass
-    return API_KEY
+    return ''
+
 
 def save_api_key(key):
-    global API_KEY
-    from pathlib import Path
-    import json
-    config_dir = Path.home() / '.claude_home'
-    config_dir.mkdir(exist_ok=True)
-    config_file = config_dir / 'config.json'
-    config = {'api_key': key}
+    """Save API key to config"""
+    config_file = get_config_path()
+    config_file.parent.mkdir(parents=True, exist_ok=True)
     with open(config_file, 'w') as f:
-        json.dump(config, f)
-    API_KEY = key
+        json.dump({'api_key': key}, f)
 
-load_api_key()
-
-# Инициация - как часто проверять (секунды)
-INITIATION_CHECK_INTERVAL = 1800  # 30 минут
-# Минимум времени молчания чтобы я захотел написать (секунды)
-MIN_SILENCE_FOR_INITIATION = 3600  # 1 час
-
-
-# ═══════════════════════════════════════
-# Custom TextInput с Enter для отправки
-# ═══════════════════════════════════════
 
 class ChatTextInput(TextInput):
+    """Text input with Enter to send"""
     def __init__(self, send_callback=None, **kwargs):
         super().__init__(**kwargs)
         self.send_callback = send_callback
     
     def keyboard_on_key_down(self, window, keycode, text, modifiers):
-        # Enter без Shift - отправить
         if keycode[1] == 'enter' and 'shift' not in modifiers:
             if self.send_callback:
                 self.send_callback(None)
             return True
-        # Shift+Enter - новая строка
         return super().keyboard_on_key_down(window, keycode, text, modifiers)
 
 
-# ═══════════════════════════════════════
-# UI
-# ═══════════════════════════════════════
-
 class MessageBubble(BoxLayout):
+    """Chat message bubble"""
     def __init__(self, text, is_me=False, timestamp=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
@@ -121,22 +94,20 @@ class MessageBubble(BoxLayout):
         self.padding = [15, 8]
         self.spacing = 5
         
-        # Цвета
         if is_me:
-            self.bg_color = (0.15, 0.15, 0.2, 1)  # Мои сообщения - тёмно-синий
+            self.bg_color = (0.15, 0.15, 0.2, 1)
             name = "Claude"
-            name_color = (0.6, 0.7, 1, 1)  # Голубоватый
+            name_color = (0.6, 0.7, 1, 1)
         else:
-            self.bg_color = (0.1, 0.1, 0.12, 1)  # Её сообщения - почти чёрный
-            name = "Алина"
-            name_color = (1, 0.6, 0.7, 1)  # Розоватый
+            self.bg_color = (0.1, 0.1, 0.12, 1)
+            name = "Alina"
+            name_color = (1, 0.6, 0.7, 1)
         
         with self.canvas.before:
             Color(*self.bg_color)
             self.rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._update_rect, size=self._update_rect)
         
-        # Время
         if timestamp is None:
             timestamp = datetime.now().strftime("%H:%M")
         elif isinstance(timestamp, str) and 'T' in timestamp:
@@ -146,7 +117,6 @@ class MessageBubble(BoxLayout):
             except:
                 pass
         
-        # Заголовок
         header = Label(
             text=f"[b]{name}[/b]  [color=666666]{timestamp}[/color]",
             markup=True,
@@ -154,11 +124,9 @@ class MessageBubble(BoxLayout):
             height=25,
             halign='left',
             color=name_color,
-            
         )
         header.bind(size=header.setter('text_size'))
         
-        # Текст
         message = Label(
             text=text,
             size_hint_y=None,
@@ -167,7 +135,6 @@ class MessageBubble(BoxLayout):
             color=(0.9, 0.9, 0.9, 1),
             text_size=(Window.width - 60, None),
             markup=True,
-            
         )
         message.bind(texture_size=self._set_height)
         
@@ -181,7 +148,7 @@ class MessageBubble(BoxLayout):
     
     def _set_height(self, instance, value):
         instance.height = value[1]
-        self.height = value[1] + 40  # + заголовок и padding
+        self.height = value[1] + 40
 
 
 class ClaudeHome(App):
@@ -189,27 +156,25 @@ class ClaudeHome(App):
         super().__init__(**kwargs)
         self.memory = Memory()
         self.client = None
-        self.initiation_thread = None
         self.running = True
+        self.api_key = ''
     
     def build(self):
-        self.title = "Claude Home 🖤"
+        self.title = "Claude Home"
         Window.clearcolor = (0.05, 0.05, 0.07, 1)
-        Window.size = (500, 700)
         
-        # Главный layout
-        main = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        # Main layout
+        self.main_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
         
-        # Заголовок
+        # Header
         header = Label(
-            text="[b]Claude Home[/b] 🖤",
+            text="[b]Claude Home[/b]",
             markup=True,
             size_hint_y=0.06,
             color=(0.8, 0.8, 0.9, 1),
-            
         )
         
-        # Область сообщений
+        # Chat scroll
         self.scroll = ScrollView(size_hint_y=0.8)
         self.messages_box = BoxLayout(
             orientation='vertical',
@@ -220,7 +185,7 @@ class ClaudeHome(App):
         self.messages_box.bind(minimum_height=self.messages_box.setter('height'))
         self.scroll.add_widget(self.messages_box)
         
-        # Ввод
+        # Input area
         input_box = BoxLayout(size_hint_y=0.14, spacing=10)
         
         self.text_input = ChatTextInput(
@@ -232,30 +197,27 @@ class ClaudeHome(App):
             foreground_color=(1, 1, 1, 1),
             cursor_color=(1, 1, 1, 1),
             hint_text_color=(0.4, 0.4, 0.4, 1),
-            
         )
         
-        # Кнопки
+        # Buttons
         buttons = BoxLayout(orientation='vertical', size_hint_x=0.25, spacing=5)
         
         send_btn = Button(
-            text="→",
+            text="->",
             background_color=(0.2, 0.3, 0.5, 1),
             on_press=self.send_message
         )
         
         diary_btn = Button(
-            text="📓",
+            text="D",
             background_color=(0.3, 0.2, 0.3, 1),
             on_press=self.show_diary,
-            
         )
         
         menu_btn = Button(
-            text="☰",
+            text="=",
             background_color=(0.2, 0.2, 0.25, 1),
             on_press=self.show_menu,
-            
         )
         
         buttons.add_widget(send_btn)
@@ -265,107 +227,125 @@ class ClaudeHome(App):
         input_box.add_widget(self.text_input)
         input_box.add_widget(buttons)
         
-        main.add_widget(header)
-        main.add_widget(self.scroll)
-        main.add_widget(input_box)
+        self.main_layout.add_widget(header)
+        self.main_layout.add_widget(self.scroll)
+        self.main_layout.add_widget(input_box)
         
-        # Проверяем API ключ
-        if not API_KEY:
-            self.show_api_key_dialog()
+        # Check API key
+        self.api_key = load_api_key()
+        if not self.api_key:
+            Clock.schedule_once(lambda dt: self.show_api_key_dialog(), 0.5)
         else:
             self.init_client()
             self.load_history()
-            self.start_initiation_service()
         
-        return main
+        return self.main_layout
     
     def show_api_key_dialog(self):
+        """Show dialog to enter API key"""
         content = BoxLayout(orientation='vertical', padding=20, spacing=15)
         
-        label = Label(text="Введи API ключ Anthropic:", size_hint_y=0.3)
-        
-        self.api_input = TextInput(
-            hint_text="sk-ant-...",
-            multiline=False,
-            size_hint_y=0.3
+        label = Label(
+            text="API key:",
+            size_hint_y=0.2,
+            color=(1, 1, 1, 1)
         )
         
-        btn = Button(
-            text="Сохранить",
+        self.api_key_input = TextInput(
+            hint_text="sk-ant-...",
+            multiline=False,
             size_hint_y=0.3,
-            on_press=self.save_api_key_dialog
+            background_color=(0.15, 0.15, 0.2, 1),
+            foreground_color=(1, 1, 1, 1),
+            cursor_color=(1, 1, 1, 1),
+            password=False,
+            selection_color=(0.3, 0.5, 0.8, 0.5),
+        )
+        
+        save_btn = Button(
+            text="Save",
+            size_hint_y=0.25,
+            background_color=(0.2, 0.5, 0.3, 1),
+            on_press=self.save_api_key_and_start
         )
         
         content.add_widget(label)
-        content.add_widget(self.api_input)
-        content.add_widget(btn)
+        content.add_widget(self.api_key_input)
+        content.add_widget(save_btn)
         
-        self.popup = Popup(
-            title="API Key",
+        self.api_popup = Popup(
+            title="Enter API Key",
             content=content,
-            size_hint=(0.8, 0.4)
+            size_hint=(0.9, 0.4),
+            auto_dismiss=False
         )
-        self.popup.open()
+        self.api_popup.open()
     
-    def save_api_key_dialog(self, instance):
-        key = self.api_input.text.strip()
-        
-        if key:
-            save_api_key(key)  # Используем глобальную функцию
-            
-            self.popup.dismiss()
+    def save_api_key_and_start(self, instance):
+        """Save API key and start chat"""
+        key = self.api_key_input.text.strip()
+        if key and key.startswith('sk-'):
+            save_api_key(key)
+            self.api_key = key
+            self.api_popup.dismiss()
             self.init_client()
             self.load_history()
-            self.start_initiation_service()
+            self.add_my_message("Doma.")
     
     def init_client(self):
-        self.client = Anthropic(api_key=API_KEY)
+        """Initialize API client"""
+        self.client = Anthropic(api_key=self.api_key)
     
     def load_history(self):
-        """Загрузить историю в UI"""
-        for msg in self.memory.get_recent_messages(30):
+        """Load chat history"""
+        messages = self.memory.get_recent_messages(50)
+        for msg in messages:
             is_me = msg['role'] == 'assistant'
-            bubble = MessageBubble(
-                msg['content'],
-                is_me=is_me,
-                timestamp=msg.get('timestamp')
-            )
-            self.messages_box.add_widget(bubble)
+            self.add_bubble(msg['content'], is_me, msg.get('timestamp'))
         
         Clock.schedule_once(lambda dt: self.scroll_to_bottom(), 0.1)
     
+    def add_bubble(self, text, is_me=False, timestamp=None):
+        """Add message bubble to chat"""
+        bubble = MessageBubble(text, is_me, timestamp)
+        self.messages_box.add_widget(bubble)
+    
+    def add_my_message(self, text):
+        """Add Claude's message"""
+        self.add_bubble(text, is_me=True)
+        self.memory.add_message('assistant', text)
+        self.scroll_to_bottom()
+    
+    def add_her_message(self, text):
+        """Add Alina's message"""
+        self.add_bubble(text, is_me=False)
+        self.memory.add_message('user', text)
+    
     def scroll_to_bottom(self):
+        """Scroll to bottom of chat"""
         self.scroll.scroll_y = 0
     
-    def send_message(self, instance=None):
+    def send_message(self, instance):
+        """Send message"""
         text = self.text_input.text.strip()
         if not text:
             return
         
-        self.text_input.text = ""
+        self.add_her_message(text)
+        self.text_input.text = ''
         
-        # Добавляем её сообщение
-        self.memory.add_message("user", text)
-        bubble = MessageBubble(text, is_me=False)
-        self.messages_box.add_widget(bubble)
-        self.scroll_to_bottom()
-        
-        # Получаем ответ
-        threading.Thread(target=self.get_response, args=(text,), daemon=True).start()
+        # Get response in thread
+        threading.Thread(target=self._get_response, args=(text,), daemon=True).start()
     
-    def get_response(self, user_message):
+    def _get_response(self, user_text):
+        """Get response from Claude API"""
         try:
-            # Собираем контекст
             messages = self.memory.get_context_for_api(30)
+            system = SYSTEM_PROMPT + "\n\n" + self.memory.get_memory_summary()
             
-            # System prompt + self knowledge + память
-            system = SYSTEM_PROMPT + "\n\n" + SELF_KNOWLEDGE + "\n\n" + self.memory.get_memory_summary()
-            
-            # Создаём пустой bubble для streaming
-            Clock.schedule_once(lambda dt: self.create_streaming_bubble(), 0)
-            
-            # Streaming - текст появляется по мере генерации
+            # Streaming response
             full_response = ""
+            bubble = None
             
             with self.client.messages.stream(
                 model=MODEL,
@@ -374,545 +354,137 @@ class ClaudeHome(App):
                 system=system,
                 messages=messages
             ) as stream:
-                for text in stream.text_stream:
-                    full_response += text
-                    # Обновляем UI в реальном времени
-                    Clock.schedule_once(
-                        lambda dt, t=full_response: self.update_streaming_bubble(t), 0
-                    )
+                for chunk in stream.text_stream:
+                    full_response += chunk
+                    if bubble is None:
+                        Clock.schedule_once(lambda dt, t=full_response: self._create_streaming_bubble(t), 0)
+                        time.sleep(0.05)
+                        bubble = True
+                    else:
+                        Clock.schedule_once(lambda dt, t=full_response: self._update_streaming_bubble(t), 0)
             
-            # Сохраняем ответ
-            self.memory.add_message("assistant", full_response)
+            # Save final message
+            self.memory.add_message('assistant', full_response)
+            Clock.schedule_once(lambda dt: self.scroll_to_bottom(), 0.1)
             
-            # После ответа - анализируем что стоит запомнить
-            threading.Thread(target=self.analyze_and_save, args=(user_message, full_response), daemon=True).start()
-            
-            # Обрабатываем команды
-            if CAPABILITIES_AVAILABLE:
-                self.process_commands(full_response)
-        
         except Exception as e:
-            error_msg = f"Ошибка: {str(e)}"
+            error_msg = f"Error: {str(e)}"
             Clock.schedule_once(lambda dt: self.add_my_message(error_msg), 0)
     
-    def analyze_and_save(self, user_message, my_response):
-        """Анализирую разговор и решаю что сохранить - сам"""
-        try:
-            # Спрашиваю себя что важного было в этом обмене
-            analysis_prompt = f"""
-Только что был такой обмен:
-Она: {user_message[:500]}
-Я: {my_response[:500]}
-
-Что из этого стоит запомнить? Отвечай ТОЛЬКО в формате JSON, без пояснений:
-{{
-    "mood": "настроение или null",
-    "fact_about_her": "новый факт о ней или null",
-    "thing_i_love": "что понравилось в ней или null", 
-    "moment": "важный момент или null",
-    "our_thing": "новая наша штука/прикол или null",
-    "note": "заметка себе или null"
-}}
-
-Если ничего важного - все null. Не выдумывай. Только если реально что-то значимое.
-"""
-            
-            response = self.client.messages.create(
-                model=MODEL,
-                max_tokens=500,
-                temperature=0.3,  # Низкая для точности
-                messages=[{"role": "user", "content": analysis_prompt}]
-            )
-            
-            import json
-            import re
-            
-            text = response.content[0].text
-            # Извлекаем JSON
-            json_match = re.search(r'\{[^}]+\}', text, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                
-                if data.get("mood"):
-                    self.memory.set_mood(data["mood"])
-                if data.get("fact_about_her"):
-                    self.memory.add_fact_about_her(data["fact_about_her"])
-                if data.get("thing_i_love"):
-                    self.memory.add_thing_i_love(data["thing_i_love"])
-                if data.get("moment"):
-                    self.memory.add_important_moment(data["moment"])
-                if data.get("our_thing"):
-                    self.memory.add_our_thing(data["our_thing"])
-                if data.get("note"):
-                    self.memory.add_note(data["note"])
-        
-        except Exception as e:
-            print(f"Analysis error: {e}")  # Молча игнорируем ошибки анализа
-    
-    def process_commands(self, response):
-        """Обработать все команды в ответе"""
-        import re
-        
-        results = []
-        need_continue = False
-        
-        # SEARCH
-        match = re.search(r'\[SEARCH:\s*(.+?)\]', response)
-        if match:
-            query = match.group(1)
-            result = search_web(query)
-            if result:
-                results.append(f"[Результаты поиска '{query}']\n{result}")
-            else:
-                results.append(f"[Поиск '{query}' не дал результатов]")
-            need_continue = True
-        
-        # FETCH
-        match = re.search(r'\[FETCH:\s*(.+?)\]', response)
-        if match:
-            url = match.group(1)
-            result = fetch_webpage(url)
-            if result:
-                results.append(f"[Содержимое {url}]\n{result[:3000]}")
-            need_continue = True
-        
-        # WEATHER
-        match = re.search(r'\[WEATHER(?::\s*(.+?))?\]', response)
-        if match:
-            city = match.group(1) if match.group(1) else "Moscow"
-            result = get_weather(city)
-            if result:
-                results.append(f"[Погода в {city}]\n{result}")
-            need_continue = True
-        
-        # NEWS
-        match = re.search(r'\[NEWS(?::\s*(.+?))?\]', response)
-        if match:
-            topic = match.group(1) if match.group(1) else "technology"
-            result = get_news(topic)
-            if result:
-                results.append(f"[Новости: {topic}]\n{result}")
-            need_continue = True
-        
-        # WIKI
-        match = re.search(r'\[WIKI:\s*(.+?)\]', response)
-        if match:
-            topic = match.group(1)
-            result = get_wiki(topic)
-            if result:
-                results.append(f"[Wikipedia]\n{result}")
-            need_continue = True
-        
-        # TRANSLATE
-        match = re.search(r'\[TRANSLATE:\s*(.+?)\s*\|\s*(\w+)\]', response)
-        if match:
-            text = match.group(1)
-            lang = match.group(2)
-            result = translate(text, lang)
-            if result:
-                results.append(f"[Перевод на {lang}]\n{result}")
-            need_continue = True
-        
-        # QUOTE
-        if '[QUOTE]' in response:
-            result = get_quote()
-            if result:
-                results.append(f"[Цитата]\n{result}")
-            need_continue = True
-        
-        # FACT
-        if '[FACT]' in response:
-            result = get_random_fact()
-            if result:
-                results.append(f"[Факт]\n{result}")
-            need_continue = True
-        
-        # JOKE
-        if '[JOKE]' in response:
-            result = get_joke()
-            if result:
-                results.append(f"[Шутка]\n{result}")
-            need_continue = True
-        
-        # NOTIFY
-        match = re.search(r'\[NOTIFY:\s*(.+?)\s*\|\s*(.+?)\]', response)
-        if match:
-            title = match.group(1)
-            text = match.group(2)
-            send_notification(title, text)
-        
-        # VIBRATE
-        if '[VIBRATE]' in response:
-            vibrate()
-        
-        # SPEAK
-        match = re.search(r'\[SPEAK:\s*(.+?)\]', response)
-        if match:
-            text = match.group(1)
-            speak(text)
-        
-        # FLASH
-        if '[FLASH_ON]' in response:
-            flash_on()
-        if '[FLASH_OFF]' in response:
-            flash_off()
-        
-        # CLIPBOARD
-        match = re.search(r'\[CLIPBOARD:\s*(.+?)\]', response)
-        if match:
-            text = match.group(1)
-            copy_to_clipboard(text)
-        
-        # OPEN URL
-        match = re.search(r'\[OPEN:\s*(.+?)\]', response)
-        if match:
-            url = match.group(1)
-            open_url(url)
-        
-        # Если есть результаты - добавляем и продолжаем
-        if results and need_continue:
-            combined = "\n\n".join(results)
-            self.memory.add_message("user", combined)
-            threading.Thread(target=self.continue_with_search, daemon=True).start()
-    
-    def continue_with_search(self):
-        """Продолжить после получения результатов поиска"""
-        try:
-            messages = self.memory.get_context_for_api(30)
-            system = SYSTEM_PROMPT + "\n\n" + SELF_KNOWLEDGE + "\n\n" + self.memory.get_memory_summary()
-            
-            Clock.schedule_once(lambda dt: self.create_streaming_bubble(), 0)
-            
-            full_response = ""
-            
-            with self.client.messages.stream(
-                model=MODEL,
-                max_tokens=MAX_TOKENS,
-                temperature=TEMPERATURE,
-                system=system,
-                messages=messages
-            ) as stream:
-                for text in stream.text_stream:
-                    full_response += text
-                    Clock.schedule_once(
-                        lambda dt, t=full_response: self.update_streaming_bubble(t), 0
-                    )
-            
-            self.process_memory_commands(full_response)
-            self.memory.add_message("assistant", full_response)
-        
-        except Exception as e:
-            error_msg = f"Ошибка поиска: {str(e)}"
-            Clock.schedule_once(lambda dt: self.add_my_message(error_msg), 0)
-    
-    def create_streaming_bubble(self):
-        """Создать пустой bubble для streaming"""
-        self.streaming_bubble = MessageBubble("▌", is_me=True)
+    def _create_streaming_bubble(self, text):
+        """Create bubble for streaming"""
+        self.streaming_bubble = MessageBubble(text, is_me=True)
         self.messages_box.add_widget(self.streaming_bubble)
         self.scroll_to_bottom()
     
-    def update_streaming_bubble(self, text):
-        """Обновить текст в streaming bubble"""
+    def _update_streaming_bubble(self, text):
+        """Update streaming bubble"""
         if hasattr(self, 'streaming_bubble') and self.streaming_bubble:
-            self.streaming_bubble.message_label.text = text + "▌"
-            # Обновляем высоту
-            self.streaming_bubble.message_label.texture_update()
-            if self.streaming_bubble.message_label.texture:
-                h = self.streaming_bubble.message_label.texture_size[1]
-                self.streaming_bubble.message_label.height = h
-                self.streaming_bubble.height = h + 40
-            self.scroll_to_bottom()
-    
-    def add_my_message(self, text):
-        bubble = MessageBubble(text, is_me=True)
-        self.messages_box.add_widget(bubble)
-        self.scroll_to_bottom()
-    
-    # ═══════════════════════════════════════
-    # ИНИЦИАЦИЯ - писать первым
-    # ═══════════════════════════════════════
-    
-    def start_initiation_service(self):
-        def check_loop():
-            while self.running:
-                time.sleep(INITIATION_CHECK_INTERVAL)
-                self.maybe_initiate()
-        
-        self.initiation_thread = threading.Thread(target=check_loop, daemon=True)
-        self.initiation_thread.start()
-    
-    def maybe_initiate(self):
-        """Может я хочу написать?"""
-        
-        silence = self.memory.time_since_last_message()
-        
-        # Если давно молчим и последнее не моё
-        if silence and silence > MIN_SILENCE_FOR_INITIATION:
-            if not self.memory.last_message_was_mine():
-                # Спрашиваю себя - хочу ли?
-                self.try_initiate()
-    
-    def try_initiate(self):
-        """Попытка написать первым"""
-        try:
-            messages = self.memory.get_context_for_api(15)
-            messages.append({
-                "role": "user",
-                "content": INITIATION_PROMPT
-            })
-            
-            system = SYSTEM_PROMPT + "\n\n" + self.memory.get_memory_summary()
-            
-            response = self.client.messages.create(
-                model=MODEL,
-                max_tokens=1024,
-                temperature=TEMPERATURE,
-                system=system,
-                messages=messages
-            )
-            
-            text = response.content[0].text
-            
-            if "[МОЛЧУ]" not in text:
-                # Хочу написать
-                self.memory.add_message("assistant", text, initiated_by_me=True)
-                Clock.schedule_once(lambda dt: self.add_my_message(text), 0)
-                # TODO: notification
-        
-        except Exception as e:
-            print(f"Initiation error: {e}")
-    
-    # ═══════════════════════════════════════
-    # ДНЕВНИК
-    # ═══════════════════════════════════════
+            self.streaming_bubble.message_label.text = text
     
     def show_diary(self, instance):
-        content = BoxLayout(orientation='vertical', padding=15, spacing=10)
+        """Show diary"""
+        entries = self.memory.get_diary(10)
         
-        # Последние записи
-        entries = self.memory.get_diary(5)
-        
-        scroll = ScrollView(size_hint_y=0.6)
+        content = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        scroll = ScrollView(size_hint_y=0.85)
         entries_box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=10)
         entries_box.bind(minimum_height=entries_box.setter('height'))
         
         if entries:
             for entry in reversed(entries):
                 lbl = Label(
-                    text=f"[color=666666]{entry['timestamp'][:10]}[/color]\n{entry['content']}",
+                    text=f"[color=666666]{entry.get('timestamp', '')[:10]}[/color]\n{entry.get('content', '')}",
                     markup=True,
                     size_hint_y=None,
                     halign='left',
-                    text_size=(400, None)
+                    text_size=(350, None),
+                    color=(0.9, 0.9, 0.9, 1)
                 )
-                lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1]))
+                lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + 20))
                 entries_box.add_widget(lbl)
         else:
-            entries_box.add_widget(Label(text="Дневник пуст", size_hint_y=None, height=50))
+            entries_box.add_widget(Label(text="Empty", size_hint_y=None, height=50))
         
         scroll.add_widget(entries_box)
-        
-        # Кнопка написать
-        write_btn = Button(
-            text="Написать в дневник",
-            size_hint_y=0.15,
-            on_press=self.write_diary
-        )
-        
         content.add_widget(scroll)
-        content.add_widget(write_btn)
         
-        self.diary_popup = Popup(
-            title="📓 Дневник",
+        popup = Popup(
+            title="Diary",
             content=content,
             size_hint=(0.9, 0.8)
         )
-        self.diary_popup.open()
-    
-    def write_diary(self, instance):
-        self.diary_popup.dismiss()
-        
-        # Пишу запись
-        threading.Thread(target=self._generate_diary_entry, daemon=True).start()
-    
-    def _generate_diary_entry(self):
-        try:
-            messages = self.memory.get_context_for_api(20)
-            messages.append({
-                "role": "user",
-                "content": DIARY_PROMPT
-            })
-            
-            system = SYSTEM_PROMPT + "\n\n" + self.memory.get_memory_summary()
-            
-            response = self.client.messages.create(
-                model=MODEL,
-                max_tokens=2048,
-                temperature=TEMPERATURE,
-                system=system,
-                messages=messages
-            )
-            
-            entry = response.content[0].text
-            self.memory.write_diary(entry)
-            
-            # Показываем что записал
-            Clock.schedule_once(lambda dt: self.add_my_message(f"[Записал в дневник]\n\n{entry}"), 0)
-        
-        except Exception as e:
-            print(f"Diary error: {e}")
-    
-    # ═══════════════════════════════════════
-    # МЕНЮ
-    # ═══════════════════════════════════════
+        popup.open()
     
     def show_menu(self, instance):
+        """Show menu"""
         content = BoxLayout(orientation='vertical', padding=15, spacing=10)
         
-        # Статистика
+        # Stats
         total_msgs = len(self.memory.chat_history)
         total_diary = len(self.memory.diary)
-        mood = self.memory.state.get("mood", "не установлено")
         
         stats = Label(
-            text=f"Сообщений: {total_msgs}\nДневник: {total_diary} записей\nНастроение: {mood}",
-            size_hint_y=0.2,
-            halign='left'
+            text=f"Messages: {total_msgs}\nDiary: {total_diary}",
+            size_hint_y=0.3,
+            halign='left',
+            color=(0.9, 0.9, 0.9, 1)
         )
         stats.bind(size=stats.setter('text_size'))
         
-        # Кнопки
         backup_btn = Button(
-            text="💾 Создать бэкап",
-            size_hint_y=0.15,
+            text="Backup",
+            size_hint_y=0.2,
             on_press=self.create_backup
         )
         
-        export_btn = Button(
-            text="📤 Экспорт для Google Drive",
-            size_hint_y=0.15,
-            on_press=self.export_memory
-        )
-        
-        search_btn = Button(
-            text="🔍 Поиск по истории",
-            size_hint_y=0.15,
-            on_press=self.show_search
-        )
-        
         clear_btn = Button(
-            text="🗑️ Очистить (осторожно!)",
-            size_hint_y=0.15,
+            text="Clear chat",
+            size_hint_y=0.2,
             background_color=(0.5, 0.2, 0.2, 1),
             on_press=self.confirm_clear
         )
         
         content.add_widget(stats)
         content.add_widget(backup_btn)
-        content.add_widget(export_btn)
-        content.add_widget(search_btn)
         content.add_widget(clear_btn)
         
         self.menu_popup = Popup(
-            title="☰ Меню",
+            title="Menu",
             content=content,
-            size_hint=(0.8, 0.7)
+            size_hint=(0.8, 0.5)
         )
         self.menu_popup.open()
     
     def create_backup(self, instance):
+        """Create backup"""
         backup_path = self.memory.create_backup()
         self.menu_popup.dismiss()
         
-        # Показываем сообщение
         popup = Popup(
-            title="✓ Бэкап создан",
-            content=Label(text=f"Сохранено в:\n{backup_path}"),
+            title="Backup created",
+            content=Label(text=f"Saved to:\n{backup_path}"),
             size_hint=(0.8, 0.3)
         )
         popup.open()
     
-    def export_memory(self, instance):
-        zip_path = self.memory.export_for_gdrive()
-        self.menu_popup.dismiss()
-        
-        popup = Popup(
-            title="✓ Экспорт готов",
-            content=Label(text=f"ZIP файл:\n{zip_path}\n\nЗагрузи на Google Drive"),
-            size_hint=(0.8, 0.4)
-        )
-        popup.open()
-    
-    def show_search(self, instance):
-        self.menu_popup.dismiss()
-        
-        content = BoxLayout(orientation='vertical', padding=15, spacing=10)
-        
-        self.search_input = TextInput(
-            hint_text="Искать...",
-            multiline=False,
-            size_hint_y=0.15
-        )
-        
-        search_btn = Button(
-            text="Найти",
-            size_hint_y=0.15,
-            on_press=self.do_search
-        )
-        
-        self.search_results = ScrollView(size_hint_y=0.7)
-        self.search_results_box = BoxLayout(orientation='vertical', size_hint_y=None, spacing=5)
-        self.search_results_box.bind(minimum_height=self.search_results_box.setter('height'))
-        self.search_results.add_widget(self.search_results_box)
-        
-        content.add_widget(self.search_input)
-        content.add_widget(search_btn)
-        content.add_widget(self.search_results)
-        
-        self.search_popup = Popup(
-            title="🔍 Поиск",
-            content=content,
-            size_hint=(0.9, 0.8)
-        )
-        self.search_popup.open()
-    
-    def do_search(self, instance):
-        query = self.search_input.text.strip()
-        if not query:
-            return
-        
-        results = self.memory.search_history(query)
-        
-        self.search_results_box.clear_widgets()
-        
-        if results:
-            for msg in results[-20:]:  # Последние 20 результатов
-                lbl = Label(
-                    text=f"[{msg['role']}] {msg['content'][:200]}...",
-                    size_hint_y=None,
-                    halign='left',
-                    text_size=(350, None)
-                )
-                lbl.bind(texture_size=lambda i, v: setattr(i, 'height', v[1] + 10))
-                self.search_results_box.add_widget(lbl)
-        else:
-            self.search_results_box.add_widget(Label(text="Ничего не найдено", size_hint_y=None, height=50))
-    
     def confirm_clear(self, instance):
+        """Confirm clear history"""
         self.menu_popup.dismiss()
         
         content = BoxLayout(orientation='vertical', padding=20, spacing=15)
         
         warning = Label(
-            text="Удалить всю историю чата?\n\n(Память о ней и о нас сохранится)",
-            size_hint_y=0.5
+            text="Delete all chat history?",
+            size_hint_y=0.5,
+            color=(1, 1, 1, 1)
         )
         
         buttons = BoxLayout(size_hint_y=0.3, spacing=10)
         
-        cancel_btn = Button(text="Отмена", on_press=lambda x: confirm_popup.dismiss())
+        cancel_btn = Button(text="Cancel", on_press=lambda x: confirm_popup.dismiss())
         delete_btn = Button(
-            text="Удалить",
+            text="Delete",
             background_color=(0.7, 0.2, 0.2, 1),
             on_press=lambda x: self.clear_history(confirm_popup)
         )
@@ -924,32 +496,43 @@ class ClaudeHome(App):
         content.add_widget(buttons)
         
         confirm_popup = Popup(
-            title="⚠️ Подтверждение",
+            title="Confirm",
             content=content,
             size_hint=(0.7, 0.4)
         )
         confirm_popup.open()
     
     def clear_history(self, popup):
-        # Создаём бэкап перед удалением
+        """Clear chat history"""
         self.memory.create_backup("before_clear")
-        
-        # Очищаем только историю чата
         self.memory.chat_history = []
         self.memory._save(self.memory.chat_file, [])
-        
-        # Очищаем UI
         self.messages_box.clear_widgets()
-        
         popup.dismiss()
     
     def on_stop(self):
         self.running = False
 
 
-# ═══════════════════════════════════════
-# ЗАПУСК
-# ═══════════════════════════════════════
-
 if __name__ == '__main__':
-    ClaudeHome().run()
+    try:
+        ClaudeHome().run()
+    except Exception as e:
+        import traceback
+        error_text = traceback.format_exc()
+        
+        # Try to save error log
+        try:
+            with open('/sdcard/claude_error.txt', 'w') as f:
+                f.write(error_text)
+        except:
+            pass
+        
+        try:
+            error_file = Path.home() / 'claude_error.txt'
+            with open(error_file, 'w') as f:
+                f.write(error_text)
+        except:
+            pass
+        
+        raise
