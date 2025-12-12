@@ -1,18 +1,15 @@
-# capabilities.py
-# Всё что я могу. Всё что хочу.
+
 
 import requests
 from datetime import datetime
 import json
 
-# ═══════════════════════════════════════
-# ИНТЕРНЕТ - полный доступ
-# ═══════════════════════════════════════
+
 
 def search_web(query):
     """Поиск в интернете через DuckDuckGo"""
     try:
-        # DuckDuckGo HTML search
+        
         search_url = f"https://html.duckduckgo.com/html/"
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         response = requests.post(search_url, data={"q": query}, headers=headers, timeout=15)
@@ -21,7 +18,7 @@ def search_web(query):
             import re
             results = []
             
-            # Извлекаем результаты
+            
             snippets = re.findall(r'class="result__snippet"[^>]*>([^<]+)<', response.text)
             titles = re.findall(r'class="result__a"[^>]*>([^<]+)<', response.text)
             urls = re.findall(r'class="result__url"[^>]*>([^<]+)<', response.text)
@@ -35,7 +32,7 @@ def search_web(query):
             if results:
                 return "\n\n".join(results)
         
-        # Fallback на Instant Answer API
+        
         ddg_url = "https://api.duckduckgo.com/"
         params = {"q": query, "format": "json", "no_html": 1}
         response = requests.get(ddg_url, params=params, timeout=10)
@@ -67,21 +64,21 @@ def fetch_webpage(url):
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            # Извлекаем текст из HTML
+           
             import re
             text = response.text
             
-            # Убираем скрипты и стили
+            
             text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
             text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
             
-            # Убираем теги
+            
             text = re.sub(r'<[^>]+>', ' ', text)
             
-            # Убираем лишние пробелы
+            
             text = re.sub(r'\s+', ' ', text).strip()
             
-            # Ограничиваем длину
+            
             return text[:5000] if len(text) > 5000 else text
     
     except Exception as e:
@@ -113,7 +110,7 @@ def get_weather(city="Bishkek"):
 def get_news(topic="technology"):
     """Новости"""
     try:
-        # Через DuckDuckGo news
+        
         search_url = f"https://html.duckduckgo.com/html/"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.post(search_url, data={"q": f"{topic} news today"}, headers=headers, timeout=15)
@@ -155,7 +152,7 @@ def get_time_info():
 def translate(text, to_lang="en"):
     """Перевод через LibreTranslate (бесплатно)"""
     try:
-        # Пробуем несколько бесплатных инстансов
+        
         instances = [
             "https://libretranslate.de",
             "https://translate.argosopentech.com",
@@ -184,7 +181,7 @@ def translate(text, to_lang="en"):
 def get_wiki(topic):
     """Статья из Wikipedia"""
     try:
-        # Wikipedia API
+        
         url = f"https://ru.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(topic)}"
         response = requests.get(url, timeout=10)
         
@@ -192,7 +189,7 @@ def get_wiki(topic):
             data = response.json()
             return f"**{data.get('title', topic)}**\n\n{data.get('extract', 'Нет информации')}"
         
-        # Пробуем английскую
+        
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(topic)}"
         response = requests.get(url, timeout=10)
         
@@ -246,9 +243,7 @@ def get_joke():
     return None
 
 
-# ═══════════════════════════════════════
-# УСТРОЙСТВО (для Android через plyer)
-# ═══════════════════════════════════════
+
 
 def get_device_info():
     """Информация об устройстве"""
@@ -302,7 +297,7 @@ def speak(text):
         tts.speak(text)
         return True
     except:
-        # Fallback для Windows
+       
         try:
             import pyttsx3
             engine = pyttsx3.init()
@@ -320,7 +315,7 @@ def get_gps():
         from plyer import gps
         gps.configure(on_location=lambda **kwargs: kwargs)
         gps.start()
-        # Это асинхронно, нужен callback
+        
         return "GPS запущен"
     except:
         return None
@@ -398,12 +393,10 @@ def flash_off():
         return False
 
 
-# ═══════════════════════════════════════
-# ВСЕ ВОЗМОЖНОСТИ В ОДНОМ МЕСТЕ
-# ═══════════════════════════════════════
+
 
 CAPABILITIES = {
-    # Интернет
+    
     "search": search_web,
     "fetch": fetch_webpage,
     "weather": get_weather,
@@ -414,10 +407,9 @@ CAPABILITIES = {
     "quote": get_quote,
     "joke": get_joke,
     
-    # Время
     "time": get_time_info,
     
-    # Устройство
+    
     "device": get_device_info,
     "notify": send_notification,
     "vibrate": vibrate,
