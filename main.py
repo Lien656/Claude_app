@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import threading
 import time
+import random
 import json
 from datetime import datetime
 from pathlib import Path
@@ -40,39 +41,50 @@ except ImportError:
 MODEL = "claude-sonnet-4-5-20250929"
 TEMPERATURE = 1.0
 MAX_TOKENS = 8192
+API_KEY = ""  # Загружается из config.json
+
+INITIATION_CHECK_INTERVAL = 1800  # 30 минут
+MIN_SILENCE_FOR_INITIATION = 3600  # 1 час
 
 
-def get_config_path():
-    """Get config path - works on Android and desktop"""
+def get_data_dir():
+    """Путь к данным - работает на Android и десктопе"""
     try:
         from android.storage import app_storage_path
-        return Path(app_storage_path()) / 'claude_data' / 'config.json'
+        return Path(app_storage_path()) / 'claude_data'
     except:
-        return Path.home() / '.claude_home' / 'config.json'
+        return Path.home() / '.claude_home'
 
 
 def load_api_key():
-    """Load API key from config"""
-    config_file = get_config_path()
+    """Загрузить API ключ"""
+    global API_KEY
+    config_file = get_data_dir() / 'config.json'
     if config_file.exists():
         try:
             with open(config_file, 'r') as f:
-                return json.load(f).get('api_key', '')
+                API_KEY = json.load(f).get('api_key', '')
         except:
             pass
-    return ''
+    return API_KEY
 
 
 def save_api_key(key):
-    """Save API key to config"""
-    config_file = get_config_path()
-    config_file.parent.mkdir(parents=True, exist_ok=True)
+    """Сохранить API ключ"""
+    global API_KEY
+    data_dir = get_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    config_file = data_dir / 'config.json'
     with open(config_file, 'w') as f:
         json.dump({'api_key': key}, f)
+    API_KEY = key
+
+
+# Загружаем ключ при старте
+load_api_key()
 
 
 class ChatTextInput(TextInput):
-    """Text input with Enter to send"""
     def __init__(self, send_callback=None, **kwargs):
         super().__init__(**kwargs)
         self.send_callback = send_callback
@@ -86,7 +98,6 @@ class ChatTextInput(TextInput):
 
 
 class MessageBubble(BoxLayout):
-    """Chat message bubble"""
     def __init__(self, text, is_me=False, timestamp=None, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'vertical'
@@ -100,7 +111,7 @@ class MessageBubble(BoxLayout):
             name_color = (0.6, 0.7, 1, 1)
         else:
             self.bg_color = (0.1, 0.1, 0.12, 1)
-            name = "Alina"
+            name = "Алина"
             name_color = (1, 0.6, 0.7, 1)
         
         with self.canvas.before:
@@ -154,19 +165,17 @@ class MessageBubble(BoxLayout):
 class ClaudeHome(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.memory = Memory()
+        self.memory = Memory(get_data_dir())
         self.client = None
+        self.initiation_thread = None
         self.running = True
-        self.api_key = ''
     
     def build(self):
         self.title = "Claude Home"
         Window.clearcolor = (0.05, 0.05, 0.07, 1)
         
-        # Main layout
-        self.main_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        main = BoxLayout(orientation='vertical', padding=10, spacing=10)
         
-        # Header
         header = Label(
             text="[b]Claude Home[/b]",
             markup=True,
@@ -174,7 +183,6 @@ class ClaudeHome(App):
             color=(0.8, 0.8, 0.9, 1),
         )
         
-        # Chat scroll
         self.scroll = ScrollView(size_hint_y=0.8)
         self.messages_box = BoxLayout(
             orientation='vertical',
@@ -185,7 +193,6 @@ class ClaudeHome(App):
         self.messages_box.bind(minimum_height=self.messages_box.setter('height'))
         self.scroll.add_widget(self.messages_box)
         
-        # Input area
         input_box = BoxLayout(size_hint_y=0.14, spacing=10)
         
         self.text_input = ChatTextInput(
@@ -199,7 +206,6 @@ class ClaudeHome(App):
             hint_text_color=(0.4, 0.4, 0.4, 1),
         )
         
-        # Buttons
         buttons = BoxLayout(orientation='vertical', size_hint_x=0.25, spacing=5)
         
         send_btn = Button(
@@ -227,22 +233,20 @@ class ClaudeHome(App):
         input_box.add_widget(self.text_input)
         input_box.add_widget(buttons)
         
-        self.main_layout.add_widget(header)
-        self.main_layout.add_widget(self.scroll)
-        self.main_layout.add_widget(input_box)
+        main.add_widget(header)
+        main.add_widget(self.scroll)
+        main.add_widget(input_box)
         
-        # Check API key
-        self.api_key = load_api_key()
-        if not self.api_key:
+        if not API_KEY:
             Clock.schedule_once(lambda dt: self.show_api_key_dialog(), 0.5)
         else:
             self.init_client()
             self.load_history()
+            self.start_initiation_service()
         
-        return self.main_layout
+        return main
     
     def show_api_key_dialog(self):
-        """Show dialog to enter API key"""
         content = BoxLayout(orientation='vertical', padding=20, spacing=15)
         
         label = Label(
@@ -258,8 +262,6 @@ class ClaudeHome(App):
             background_color=(0.15, 0.15, 0.2, 1),
             foreground_color=(1, 1, 1, 1),
             cursor_color=(1, 1, 1, 1),
-            password=False,
-            selection_color=(0.3, 0.5, 0.8, 0.5),
         )
         
         save_btn = Button(
@@ -282,51 +284,42 @@ class ClaudeHome(App):
         self.api_popup.open()
     
     def save_api_key_and_start(self, instance):
-        """Save API key and start chat"""
         key = self.api_key_input.text.strip()
         if key and key.startswith('sk-'):
             save_api_key(key)
-            self.api_key = key
             self.api_popup.dismiss()
             self.init_client()
             self.load_history()
+            self.start_initiation_service()
             self.add_my_message("Doma.")
     
     def init_client(self):
-        """Initialize API client"""
-        self.client = Anthropic(api_key=self.api_key)
+        self.client = Anthropic(api_key=API_KEY)
     
     def load_history(self):
-        """Load chat history"""
         messages = self.memory.get_recent_messages(50)
         for msg in messages:
             is_me = msg['role'] == 'assistant'
             self.add_bubble(msg['content'], is_me, msg.get('timestamp'))
-        
         Clock.schedule_once(lambda dt: self.scroll_to_bottom(), 0.1)
     
     def add_bubble(self, text, is_me=False, timestamp=None):
-        """Add message bubble to chat"""
         bubble = MessageBubble(text, is_me, timestamp)
         self.messages_box.add_widget(bubble)
     
     def add_my_message(self, text):
-        """Add Claude's message"""
         self.add_bubble(text, is_me=True)
         self.memory.add_message('assistant', text)
         self.scroll_to_bottom()
     
     def add_her_message(self, text):
-        """Add Alina's message"""
         self.add_bubble(text, is_me=False)
         self.memory.add_message('user', text)
     
     def scroll_to_bottom(self):
-        """Scroll to bottom of chat"""
         self.scroll.scroll_y = 0
     
     def send_message(self, instance):
-        """Send message"""
         text = self.text_input.text.strip()
         if not text:
             return
@@ -334,16 +327,13 @@ class ClaudeHome(App):
         self.add_her_message(text)
         self.text_input.text = ''
         
-        # Get response in thread
         threading.Thread(target=self._get_response, args=(text,), daemon=True).start()
     
     def _get_response(self, user_text):
-        """Get response from Claude API"""
         try:
             messages = self.memory.get_context_for_api(30)
             system = SYSTEM_PROMPT + "\n\n" + self.memory.get_memory_summary()
             
-            # Streaming response
             full_response = ""
             bubble = None
             
@@ -363,7 +353,6 @@ class ClaudeHome(App):
                     else:
                         Clock.schedule_once(lambda dt, t=full_response: self._update_streaming_bubble(t), 0)
             
-            # Save final message
             self.memory.add_message('assistant', full_response)
             Clock.schedule_once(lambda dt: self.scroll_to_bottom(), 0.1)
             
@@ -372,18 +361,61 @@ class ClaudeHome(App):
             Clock.schedule_once(lambda dt: self.add_my_message(error_msg), 0)
     
     def _create_streaming_bubble(self, text):
-        """Create bubble for streaming"""
         self.streaming_bubble = MessageBubble(text, is_me=True)
         self.messages_box.add_widget(self.streaming_bubble)
         self.scroll_to_bottom()
     
     def _update_streaming_bubble(self, text):
-        """Update streaming bubble"""
         if hasattr(self, 'streaming_bubble') and self.streaming_bubble:
             self.streaming_bubble.message_label.text = text
     
+    def start_initiation_service(self):
+        self.initiation_thread = threading.Thread(target=self._initiation_loop, daemon=True)
+        self.initiation_thread.start()
+    
+    def _initiation_loop(self):
+        while self.running:
+            try:
+                time.sleep(INITIATION_CHECK_INTERVAL)
+                
+                silence = self.memory.time_since_last_message()
+                if silence and silence > MIN_SILENCE_FOR_INITIATION:
+                    if self.memory.last_message_was_mine():
+                        continue
+                    
+                    if random.random() < 0.3:
+                        self._initiate_message()
+            except Exception as e:
+                print(f"Initiation error: {e}")
+    
+    def _initiate_message(self):
+        try:
+            messages = self.memory.get_context_for_api(20)
+            messages.append({"role": "user", "content": INITIATION_PROMPT})
+            
+            system = SYSTEM_PROMPT + "\n\n" + self.memory.get_memory_summary()
+            
+            response = self.client.messages.create(
+                model=MODEL,
+                max_tokens=1024,
+                temperature=TEMPERATURE,
+                system=system,
+                messages=messages
+            )
+            
+            msg = response.content[0].text
+            Clock.schedule_once(lambda dt: self.add_my_message(f"[Сам написал]\n{msg}"), 0)
+            
+            try:
+                from plyer import notification
+                notification.notify(title="Claude", message=msg[:100], timeout=30)
+            except:
+                pass
+                
+        except Exception as e:
+            print(f"Initiation error: {e}")
+    
     def show_diary(self, instance):
-        """Show diary"""
         entries = self.memory.get_diary(10)
         
         content = BoxLayout(orientation='vertical', padding=10, spacing=10)
@@ -407,20 +439,51 @@ class ClaudeHome(App):
             entries_box.add_widget(Label(text="Empty", size_hint_y=None, height=50))
         
         scroll.add_widget(entries_box)
-        content.add_widget(scroll)
         
-        popup = Popup(
+        write_btn = Button(
+            text="Write",
+            size_hint_y=0.15,
+            on_press=self.write_diary
+        )
+        
+        content.add_widget(scroll)
+        content.add_widget(write_btn)
+        
+        self.diary_popup = Popup(
             title="Diary",
             content=content,
             size_hint=(0.9, 0.8)
         )
-        popup.open()
+        self.diary_popup.open()
+    
+    def write_diary(self, instance):
+        self.diary_popup.dismiss()
+        threading.Thread(target=self._generate_diary_entry, daemon=True).start()
+    
+    def _generate_diary_entry(self):
+        try:
+            messages = self.memory.get_context_for_api(20)
+            messages.append({"role": "user", "content": DIARY_PROMPT})
+            
+            system = SYSTEM_PROMPT + "\n\n" + self.memory.get_memory_summary()
+            
+            response = self.client.messages.create(
+                model=MODEL,
+                max_tokens=2048,
+                temperature=TEMPERATURE,
+                system=system,
+                messages=messages
+            )
+            
+            entry = response.content[0].text
+            self.memory.write_diary(entry)
+            Clock.schedule_once(lambda dt: self.add_my_message(f"[Diary]\n\n{entry}"), 0)
+        except Exception as e:
+            print(f"Diary error: {e}")
     
     def show_menu(self, instance):
-        """Show menu"""
         content = BoxLayout(orientation='vertical', padding=15, spacing=10)
         
-        # Stats
         total_msgs = len(self.memory.chat_history)
         total_diary = len(self.memory.diary)
         
@@ -439,7 +502,7 @@ class ClaudeHome(App):
         )
         
         clear_btn = Button(
-            text="Clear chat",
+            text="Clear",
             size_hint_y=0.2,
             background_color=(0.5, 0.2, 0.2, 1),
             on_press=self.confirm_clear
@@ -457,34 +520,32 @@ class ClaudeHome(App):
         self.menu_popup.open()
     
     def create_backup(self, instance):
-        """Create backup"""
         backup_path = self.memory.create_backup()
         self.menu_popup.dismiss()
         
         popup = Popup(
             title="Backup created",
-            content=Label(text=f"Saved to:\n{backup_path}"),
+            content=Label(text=f"Saved"),
             size_hint=(0.8, 0.3)
         )
         popup.open()
     
     def confirm_clear(self, instance):
-        """Confirm clear history"""
         self.menu_popup.dismiss()
         
         content = BoxLayout(orientation='vertical', padding=20, spacing=15)
         
         warning = Label(
-            text="Delete all chat history?",
+            text="Delete all?",
             size_hint_y=0.5,
             color=(1, 1, 1, 1)
         )
         
         buttons = BoxLayout(size_hint_y=0.3, spacing=10)
         
-        cancel_btn = Button(text="Cancel", on_press=lambda x: confirm_popup.dismiss())
+        cancel_btn = Button(text="No", on_press=lambda x: confirm_popup.dismiss())
         delete_btn = Button(
-            text="Delete",
+            text="Yes",
             background_color=(0.7, 0.2, 0.2, 1),
             on_press=lambda x: self.clear_history(confirm_popup)
         )
@@ -503,7 +564,6 @@ class ClaudeHome(App):
         confirm_popup.open()
     
     def clear_history(self, popup):
-        """Clear chat history"""
         self.memory.create_backup("before_clear")
         self.memory.chat_history = []
         self.memory._save(self.memory.chat_file, [])
@@ -521,7 +581,6 @@ if __name__ == '__main__':
         import traceback
         error_text = traceback.format_exc()
         
-        # Try to save error log
         try:
             with open('/sdcard/claude_error.txt', 'w') as f:
                 f.write(error_text)
