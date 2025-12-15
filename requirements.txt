@@ -1,9 +1,1 @@
-kivy>=2.3.0
-requests>=2.31.0
-pillow>=10.0.0
-plyer>=2.1.0
-certifi>=2024.7.4
-idna>=3.7
-chardet>=5.2.0
-pyjnius>=1.6.1
-android>=11.0.0
+requirements = python3,kivy==2.2.1,requests,plyer,certifi
