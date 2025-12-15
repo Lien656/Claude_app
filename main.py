@@ -30,7 +30,7 @@ from kivy.metrics import dp
 
 # ═══ ФИКС КЛАВИАТУРЫ ═══
 Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_expo'}
-Window.softinput_mode = 'below_target'
+Window.softinput_mode = ''
 
 # ═══ ИМПОРТЫ ПРОЕКТА ═══
 from api_client import Anthropic
