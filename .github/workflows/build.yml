@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
     - uses: actions/checkout@v4
@@ -42,10 +42,13 @@ jobs:
           openjdk-17-jdk \
           unzip \
           autoconf \
+          automake \
           libtool \
+          libtool-bin \
           pkg-config \
           libncurses5-dev \
           libncursesw5-dev \
+          libtinfo5 \
           cmake \
           libffi-dev \
           libssl-dev
