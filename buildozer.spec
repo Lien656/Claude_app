@@ -1,22 +1,35 @@
 [app]
 title = Claude Home
-package.name = claude_home
-package.domain = org.alina
+package.name = claudehome
+package.domain = org.claude
+
 source.dir = .
-source.include_exts = py,png,jpg,kv,json
-version = 2.0
-requirements = python3,kivy==2.2.1,requests,plyer,certifi,pillow,pyjnius
+source.include_exts = py,png,jpg,json
+
+version = 1.0.0
+
+requirements = python3,kivy==2.3.0,requests,certifi,pillow,plyer,pyjnius
+
 orientation = portrait
 fullscreen = 0
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE,CAMERA,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE
-android.api = 33
-android.minapi = 28
-android.ndk_api = 28
-android.arch = arm64-v8a
+
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_AUDIO,VIBRATE,CAMERA,FOREGROUND_SERVICE,RECEIVE_BOOT_COMPLETED,POST_NOTIFICATIONS
+
+android.api = 34
+android.minapi = 26
+android.ndk = 25b
+android.archs = arm64-v8a
 android.allow_backup = True
-icon.filename = icon.png
-android.enable_androidx = True
+
+android.release_artifact = apk
+android.debug_artifact = apk
+
+presplash.filename = %(source.dir)s/presplash.png
+icon.filename = %(source.dir)s/icon.png
+
+log_level = 2
+warn_on_root = 1
 
 [buildozer]
 log_level = 2
-warn_on_root = 0
+warn_on_root = 1
