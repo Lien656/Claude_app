@@ -26,23 +26,7 @@ from kivy.metrics import dp
 # resize = окно сжимается, input остаётся над клавой
 Window.softinput_mode = 'resize'
 
-# Системный шрифт Android
-from kivy.core.text import LabelBase
-import os
 
-# Ищем рабочий шрифт
-FONTS = [
-    '/system/fonts/Roboto-Regular.ttf',
-    '/system/fonts/DroidSans.ttf', 
-    '/system/fonts/NotoSans-Regular.ttf',
-]
-for f in FONTS:
-    if os.path.exists(f):
-        try:
-            LabelBase.register(name='Roboto', fn_regular=f)
-            break
-        except:
-            pass
 
 from api_client import Anthropic
 from memory import Memory
