@@ -26,17 +26,7 @@ from kivy.metrics import dp
 # resize = окно сжимается, input остаётся над клавой
 Window.softinput_mode = 'resize'
 
-# === EMOJI FONT ===
-from kivy.core.text import LabelBase
-# Регистрируем шрифт с эмодзи (Noto поддерживает)
-try:
-    LabelBase.register(
-        name='Roboto',
-        fn_regular='/system/fonts/NotoColorEmoji.ttf',
-        fn_bold='/system/fonts/NotoColorEmoji.ttf'
-    )
-except:
-    pass
+# Emoji рендерятся через системный шрифт Android автоматически
 
 from api_client import Anthropic
 from memory import Memory
