@@ -7,8 +7,6 @@ __pycache__/
 .Python
 *.egg
 *.egg-info/
-*.pyc
-*.pyo
 .buildozer/
 bin/
 .idea/
@@ -17,4 +15,3 @@ bin/
 *.swo
 .DS_Store
 Thumbs.db
-*.log
