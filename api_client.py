@@ -5,7 +5,6 @@ from typing import List, Dict
 import base64
 from pathlib import Path
 
-# SSL FIX для Android
 try:
     import certifi
     import os
@@ -39,55 +38,17 @@ class ClaudeClient:
         }
         if system:
             payload["system"] = system
-        
+
         try:
             resp = requests.post(API_URL, headers=self.headers,
                                 json=payload, timeout=120, verify=SSL_VERIFY)
         except:
-            # Fallback
             resp = requests.post(API_URL, headers=self.headers,
                                 json=payload, timeout=120, verify=False)
-        
+
         if resp.status_code != 200:
             raise Exception(f"API {resp.status_code}: {resp.text[:200]}")
         return resp.json()["content"][0]["text"]
-
-    def stream(self, model: str, messages: List[Dict],
-               system: str = "", max_tokens: int = 4096,
-               temperature: float = 1.0):
-        payload = {
-            "model": model,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "messages": messages,
-            "stream": True
-        }
-        if system:
-            payload["system"] = system
-        
-        try:
-            resp = requests.post(API_URL, headers=self.headers,
-                                json=payload, stream=True, timeout=120, verify=SSL_VERIFY)
-        except:
-            resp = requests.post(API_URL, headers=self.headers,
-                                json=payload, stream=True, timeout=120, verify=False)
-        
-        if resp.status_code != 200:
-            raise Exception(f"API {resp.status_code}: {resp.text[:200]}")
-        
-        for line in resp.iter_lines(decode_unicode=True):
-            if line and line.startswith("data: "):
-                data = line[6:]
-                if data == "[DONE]":
-                    break
-                try:
-                    event = json.loads(data)
-                    if event.get("type") == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            yield delta.get("text", "")
-                except:
-                    continue
 
 
 class Messages:
