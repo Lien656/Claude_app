@@ -1,5 +1,12 @@
 config.json
+config.py
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
 *.pyc
 *.pyo
 .buildozer/
@@ -7,5 +14,7 @@ bin/
 .idea/
 .vscode/
 *.swp
+*.swo
 .DS_Store
+Thumbs.db
 *.log
