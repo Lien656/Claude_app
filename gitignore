@@ -1,8 +1,5 @@
-# Конфиг с ключами - НИКОГДА не пушить
 config.json
 config.py
-
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,17 +7,11 @@ __pycache__/
 .Python
 *.egg
 *.egg-info/
-
-# Buildozer
 .buildozer/
 bin/
-
-# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
