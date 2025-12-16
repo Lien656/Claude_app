@@ -4,11 +4,11 @@ package.name = claude_home
 package.domain = org.alina
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
-version = 2.1
+version = 2.0
 requirements = python3,kivy==2.2.1,requests,plyer,certifi,pillow,pyjnius
 orientation = portrait
 fullscreen = 0
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES,VIBRATE,CAMERA,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE,CAMERA,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE
 android.api = 33
 android.minapi = 28
 android.ndk_api = 28
