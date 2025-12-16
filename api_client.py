@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
+"""API клиент для Anthropic"""
+
 import requests
 import json
-from typing import List, Dict
-import base64
-from pathlib import Path
 
+API_URL = "https://api.anthropic.com/v1/messages"
+VERSION = "2023-06-01"
+
+# SSL fix для Android
 try:
     import certifi
     import os
@@ -14,57 +17,91 @@ try:
 except:
     SSL_VERIFY = True
 
-API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
+
+class APIError(Exception):
+    pass
 
 
-class ClaudeClient:
-    def __init__(self, api_key: str):
+class Anthropic:
+    """Клиент Anthropic API"""
+    
+    def __init__(self, api_key):
         self.api_key = api_key
-        self.headers = {
-            "x-api-key": api_key,
+        self.messages = Messages(self)
+    
+    def _request(self, payload):
+        headers = {
+            "x-api-key": self.api_key,
             "content-type": "application/json",
-            "anthropic-version": ANTHROPIC_VERSION
+            "anthropic-version": VERSION
         }
+        
+        try:
+            resp = requests.post(
+                API_URL,
+                headers=headers,
+                json=payload,
+                timeout=180,  # 3 минуты для длинных ответов
+                verify=SSL_VERIFY
+            )
+        except requests.exceptions.SSLError:
+            # Fallback без SSL верификации
+            resp = requests.post(
+                API_URL,
+                headers=headers,
+                json=payload,
+                timeout=180,
+                verify=False
+            )
+        
+        if resp.status_code != 200:
+            try:
+                err = resp.json()
+                msg = err.get('error', {}).get('message', resp.text[:200])
+            except:
+                msg = resp.text[:200]
+            raise APIError(f"API {resp.status_code}: {msg}")
+        
+        return resp.json()
 
-    def create(self, model: str, messages: List[Dict],
-               system: str = "", max_tokens: int = 4096,
-               temperature: float = 1.0) -> str:
+
+class Messages:
+    """Интерфейс messages"""
+    
+    def __init__(self, client):
+        self.client = client
+    
+    def create(self, model, messages, system="", max_tokens=8192, temperature=1.0, **kwargs):
         payload = {
             "model": model,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": messages
         }
+        
         if system:
             payload["system"] = system
-
-        try:
-            resp = requests.post(API_URL, headers=self.headers,
-                                json=payload, timeout=120, verify=SSL_VERIFY)
-        except:
-            resp = requests.post(API_URL, headers=self.headers,
-                                json=payload, timeout=120, verify=False)
-
-        if resp.status_code != 200:
-            raise Exception(f"API {resp.status_code}: {resp.text[:200]}")
-        return resp.json()["content"][0]["text"]
+        
+        data = self.client._request(payload)
+        
+        # Возвращаем объект с .content[0].text
+        return Response(data)
 
 
-class Messages:
-    def __init__(self, client: ClaudeClient):
-        self._client = client
-
-    def create(self, model, messages, system="", max_tokens=4096,
-               temperature=1.0, **kwargs):
-        text = self._client.create(model, messages, system,
-                                   max_tokens, temperature)
-        return type('Response', (), {
-            'content': [type('Content', (), {'text': text})()]
-        })()
+class Response:
+    """Ответ API"""
+    
+    def __init__(self, data):
+        self.data = data
+        self.content = [Content(c) for c in data.get('content', [])]
+        self.model = data.get('model', '')
+        self.stop_reason = data.get('stop_reason', '')
+        self.usage = data.get('usage', {})
 
 
-class Anthropic:
-    def __init__(self, api_key: str):
-        self._client = ClaudeClient(api_key)
-        self.messages = Messages(self._client)
+class Content:
+    """Контент ответа"""
+    
+    def __init__(self, data):
+        self.type = data.get('type', 'text')
+        self.text = data.get('text', '')
