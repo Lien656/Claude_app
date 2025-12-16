@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Claude Home - Samsung S25 Ultra"""
-
 import threading
+import time
+import random
 import json
 import base64
 import os
@@ -20,17 +20,15 @@ from kivy.core.window import Window
 from kivy.uix.popup import Popup
 from kivy.graphics import Color, RoundedRectangle
 from kivy.core.clipboard import Clipboard
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.metrics import dp
 
-# === КЛАВИАТУРА ===
-# resize = окно сжимается, input остаётся над клавой
+# Клавиатура поднимает input
 Window.softinput_mode = 'resize'
-
-
 
 from api_client import Anthropic
 from memory import Memory
-from system_prompt import SYSTEM_PROMPT
+from system_prompt import SYSTEM_PROMPT, INITIATION_PROMPT, DIARY_PROMPT
 
 try:
     from claude_core import SELF_KNOWLEDGE
@@ -38,7 +36,7 @@ except:
     SELF_KNOWLEDGE = ""
 
 try:
-    from plyer import filechooser, vibrator
+    from plyer import filechooser, notification, vibrator
     PLYER = True
 except:
     PLYER = False
@@ -50,20 +48,21 @@ try:
 except:
     ANDROID = False
 
-# Цвета
-BLACK = [0.08, 0.08, 0.08, 1]
-DARK = [0.12, 0.12, 0.12, 1]
-DARK2 = [0.16, 0.16, 0.16, 1]
-RED_DARK = [0.25, 0.1, 0.1, 1]
-RED = [0.5, 0.15, 0.15, 1]
-RED_LIGHT = [0.65, 0.2, 0.2, 1]
-TEXT_WHITE = [0.92, 0.88, 0.85, 1]
-TEXT_GRAY = [0.55, 0.55, 0.55, 1]
+BG = (0.176, 0.176, 0.176, 1)
+TEXT = (0.831, 0.784, 0.753, 1)
+NAME_COLOR = (0.255, 0.043, 0.043, 1)
+BG_INPUT = (0.22, 0.22, 0.22, 1)
+BG_MSG_ME = (0.2, 0.15, 0.15, 1)
+BG_MSG_HER = (0.2, 0.2, 0.2, 1)
+ACCENT = (0.35, 0.08, 0.08, 1)
 
 MODEL = "claude-sonnet-4-5-20250929"
-MAX_TOKENS = 16384
 TEMPERATURE = 1.0
+MAX_TOKENS = 8192
 API_KEY = ""
+
+INITIATION_CHECK_INTERVAL = 1800
+MIN_SILENCE_FOR_INITIATION = 3600
 
 
 def get_data_dir():
@@ -81,10 +80,11 @@ def get_shared_dir():
 
 def load_api_key():
     global API_KEY
-    cfg = get_data_dir() / 'config.json'
-    if cfg.exists():
+    f = get_data_dir() / 'config.json'
+    if f.exists():
         try:
-            API_KEY = json.load(open(cfg))['api_key']
+            with open(f, 'r') as file:
+                API_KEY = json.load(file).get('api_key', '')
         except:
             pass
     return API_KEY
@@ -94,84 +94,33 @@ def save_api_key(key):
     global API_KEY
     d = get_data_dir()
     d.mkdir(parents=True, exist_ok=True)
-    json.dump({'api_key': key}, open(d / 'config.json', 'w'))
+    with open(d / 'config.json', 'w') as f:
+        json.dump({'api_key': key}, f)
     API_KEY = key
 
 
 load_api_key()
 
 
-class MessageBubble(BoxLayout):
-    def __init__(self, text, is_claude=False, timestamp=None, **kwargs):
+class CopyableLabel(ButtonBehavior, Label):
+    def __init__(self, text_to_copy="", **kwargs):
         super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.size_hint_y = None
-        self.padding = [dp(14), dp(10)]
-        self.spacing = dp(6)
-        self._text = text
-        
-        bg = RED_DARK if is_claude else DARK2
-        with self.canvas.before:
-            Color(*bg)
-            self.bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(18)])
-        self.bind(pos=self._upd, size=self._upd)
-        
-        name = "Claude" if is_claude else "Lien"
-        ts = timestamp or datetime.now().strftime("%H:%M")
-        if isinstance(ts, str) and 'T' in ts:
-            try:
-                ts = datetime.fromisoformat(ts).strftime("%H:%M")
-            except:
-                pass
-        
-        header = BoxLayout(size_hint_y=None, height=dp(22))
-        
-        nm = Label(
-            text=name, font_size=dp(13),
-            color=RED_LIGHT if is_claude else TEXT_GRAY,
-            size_hint_x=None, width=dp(70), halign='left'
-        )
-        nm.bind(size=nm.setter('text_size'))
-        
-        tm = Label(text=str(ts), font_size=dp(11), color=TEXT_GRAY, halign='right')
-        tm.bind(size=tm.setter('text_size'))
-        
-        header.add_widget(nm)
-        header.add_widget(tm)
-        
-        self.lbl = Label(
-            text=text, font_size=dp(15), color=TEXT_WHITE,
-            size_hint_y=None, halign='left', valign='top',
-            text_size=(Window.width - dp(70), None), markup=True
-        )
-        self.lbl.bind(texture_size=self._resize)
-        
-        self.add_widget(header)
-        self.add_widget(self.lbl)
-        
+        self.text_to_copy = text_to_copy
         self._touch_start = None
-    
-    def _upd(self, *a):
-        self.bg.pos = self.pos
-        self.bg.size = self.size
-    
-    def _resize(self, inst, sz):
-        inst.height = sz[1]
-        self.height = sz[1] + dp(44)
-    
+
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            self._touch_start = Clock.get_time()
-            Clock.schedule_once(self._long_press, 0.5)
+            self._touch_start = time.time()
+            Clock.schedule_once(self._check_long, 0.5)
         return super().on_touch_down(touch)
-    
+
     def on_touch_up(self, touch):
         self._touch_start = None
         return super().on_touch_up(touch)
-    
-    def _long_press(self, dt):
-        if self._touch_start:
-            Clipboard.copy(self._text)
+
+    def _check_long(self, dt):
+        if self._touch_start and (time.time() - self._touch_start) >= 0.5:
+            Clipboard.copy(self.text_to_copy)
             if PLYER:
                 try:
                     vibrator.vibrate(0.05)
@@ -179,19 +128,73 @@ class MessageBubble(BoxLayout):
                     pass
 
 
+class MessageBubble(BoxLayout):
+    def __init__(self, text, is_me=False, timestamp=None, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.size_hint_y = None
+        self.padding = [dp(12), dp(8)]
+        self.spacing = dp(4)
+
+        bg = BG_MSG_ME if is_me else BG_MSG_HER
+        name = "Claude" if is_me else "Lien"
+        name_c = NAME_COLOR if is_me else (0.6, 0.5, 0.5, 1)
+
+        with self.canvas.before:
+            Color(*bg)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(12)])
+        self.bind(pos=self._upd, size=self._upd)
+
+        if not timestamp:
+            timestamp = datetime.now().strftime("%H:%M")
+        elif 'T' in str(timestamp):
+            try:
+                timestamp = datetime.fromisoformat(timestamp).strftime("%H:%M")
+            except:
+                pass
+
+        header = Label(
+            text=f"[b]{name}[/b] [color=666666]{timestamp}[/color]",
+            markup=True, size_hint_y=None, height=dp(22),
+            halign='left', color=name_c
+        )
+        header.bind(size=header.setter('text_size'))
+
+        self.msg = CopyableLabel(
+            text=text, text_to_copy=text,
+            size_hint_y=None, halign='left', valign='top',
+            color=TEXT, text_size=(Window.width - dp(50), None), markup=True
+        )
+        self.msg.bind(texture_size=self._set_h)
+
+        self.add_widget(header)
+        self.add_widget(self.msg)
+
+    def _upd(self, *a):
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+
+    def _set_h(self, inst, val):
+        inst.height = val[1]
+        self.height = val[1] + dp(38)
+
+    def update_text(self, text):
+        self.msg.text = text
+        self.msg.text_to_copy = text
+
+
 class ClaudeHome(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.memory = Memory(get_data_dir())
         self.client = None
-        self.pending_file = None
-        self.pending_type = None
-        self.loading = False
-    
+        self.running = True
+        self.pending_image = None
+
     def build(self):
         self.title = "Claude Home"
-        Window.clearcolor = BLACK
-        
+        Window.clearcolor = BG
+
         if ANDROID:
             request_permissions([
                 Permission.INTERNET,
@@ -199,337 +202,284 @@ class ClaudeHome(App):
                 Permission.WRITE_EXTERNAL_STORAGE,
                 Permission.READ_MEDIA_IMAGES,
                 Permission.VIBRATE,
+                Permission.CAMERA
             ])
-        
-        try:
-            get_shared_dir().mkdir(exist_ok=True)
-        except:
-            pass
-        
-        # Главный layout
-        self.root_box = BoxLayout(orientation='vertical', spacing=0)
-        
-        # Header
-        header = BoxLayout(size_hint_y=None, height=dp(56), padding=[dp(16), dp(12)])
-        with header.canvas.before:
-            Color(*DARK)
-            self.hdr_bg = RoundedRectangle(pos=header.pos, size=header.size)
-        header.bind(pos=lambda *a: setattr(self.hdr_bg, 'pos', header.pos),
-                   size=lambda *a: setattr(self.hdr_bg, 'size', header.size))
-        
-        title = Label(text="Claude Home 🖤", font_size=dp(20), color=TEXT_WHITE, halign='left')
-        title.bind(size=title.setter('text_size'))
-        
-        menu = Button(
-            text="≡", font_size=dp(28), size_hint_x=None, width=dp(50),
-            background_color=[0,0,0,0], color=TEXT_WHITE
-        )
-        menu.bind(on_press=self.show_menu)
-        
-        header.add_widget(title)
-        header.add_widget(menu)
-        
-        # Chat
-        self.scroll = ScrollView(do_scroll_x=False, bar_width=dp(3), bar_color=RED)
-        self.chat = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10), padding=[dp(10), dp(10)])
+
+        main = BoxLayout(orientation='vertical', padding=dp(6), spacing=dp(4))
+
+        header = BoxLayout(size_hint_y=None, height=dp(40))
+        header.add_widget(Label(text="[b]Claude Home[/b]", markup=True, color=TEXT))
+        header.add_widget(Button(text="=", size_hint_x=None, width=dp(45), background_color=ACCENT, on_press=self.show_menu))
+
+        self.scroll = ScrollView()
+        self.chat = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(6), padding=[0, dp(6)])
         self.chat.bind(minimum_height=self.chat.setter('height'))
         self.scroll.add_widget(self.chat)
-        
-        # Preview
-        self.preview = BoxLayout(size_hint_y=None, height=0, padding=[dp(10), dp(5)])
-        
-        # Input - фиксированный внизу
-        self.inp_area = BoxLayout(size_hint_y=None, height=dp(64), spacing=dp(8), padding=[dp(10), dp(10)])
-        with self.inp_area.canvas.before:
-            Color(*DARK)
-            self.inp_bg = RoundedRectangle(pos=self.inp_area.pos, size=self.inp_area.size)
-        self.inp_area.bind(pos=lambda *a: setattr(self.inp_bg, 'pos', self.inp_area.pos),
-                         size=lambda *a: setattr(self.inp_bg, 'size', self.inp_area.size))
-        
-        attach = Button(
-            text="+", font_size=dp(26), size_hint_x=None, width=dp(48),
-            background_color=RED, color=TEXT_WHITE
-        )
-        attach.bind(on_press=self.pick_file)
-        
-        # TextInput с поддержкой emoji
+
+        self.preview = BoxLayout(size_hint_y=None, height=0)
+
+        input_box = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(4))
+        attach = Button(text="+", size_hint_x=None, width=dp(45), background_color=BG_INPUT, font_size=dp(24), on_press=self.pick_file)
         self.inp = TextInput(
             hint_text="...",
-            multiline=False,
+            multiline=True,
+            background_color=BG_INPUT,
+            foreground_color=TEXT,
+            cursor_color=TEXT,
+            hint_text_color=(0.5, 0.5, 0.5, 1),
+            padding=[dp(10), dp(10)],
             font_size=dp(16),
-            background_color=DARK2,
-            foreground_color=TEXT_WHITE,
-            cursor_color=TEXT_WHITE,
-            hint_text_color=TEXT_GRAY,
-            padding=[dp(14), dp(12)],
-            input_type='text',
-            keyboard_suggestions=True
         )
-        self.inp.bind(on_text_validate=self.send)
-        
-        send = Button(
-            text="➤", font_size=dp(22), size_hint_x=None, width=dp(52),
-            background_color=RED, color=TEXT_WHITE
-        )
-        send.bind(on_press=self.send)
-        
-        self.inp_area.add_widget(attach)
-        self.inp_area.add_widget(self.inp)
-        self.inp_area.add_widget(send)
-        
-        self.root_box.add_widget(header)
-        self.root_box.add_widget(self.scroll)
-        self.root_box.add_widget(self.preview)
-        self.root_box.add_widget(self.inp_area)
-        
-        # Keyboard listener
-        Window.bind(on_keyboard=self._on_keyboard)
-        
+        send = Button(text=">", size_hint_x=None, width=dp(50), background_color=ACCENT, font_size=dp(26), on_press=self.send)
+
+        input_box.add_widget(attach)
+        input_box.add_widget(self.inp)
+        input_box.add_widget(send)
+
+        main.add_widget(header)
+        main.add_widget(self.scroll)
+        main.add_widget(self.preview)
+        main.add_widget(input_box)
+
         if not API_KEY:
-            Clock.schedule_once(lambda dt: self.api_dialog(), 0.3)
+            Clock.schedule_once(lambda dt: self.show_api_dialog(), 0.5)
         else:
             self.init()
-        
-        return self.root_box
-    
-    def _on_keyboard(self, window, key, *args):
-        # Back button на Android
-        if key == 27:
-            return True
-        return False
-    
-    def api_dialog(self):
-        box = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        box.add_widget(Label(text="API Key", font_size=dp(16), color=TEXT_WHITE, size_hint_y=None, height=dp(30)))
-        
-        self.api_inp = TextInput(
-            hint_text="sk-ant-api03-...",
-            multiline=False, size_hint_y=None, height=dp(50),
-            font_size=dp(14), background_color=DARK2, foreground_color=TEXT_WHITE
-        )
-        box.add_widget(self.api_inp)
-        
-        btn = Button(text="Save", size_hint_y=None, height=dp(50), background_color=RED, color=TEXT_WHITE)
-        btn.bind(on_press=self._save_key)
-        box.add_widget(btn)
-        
-        self.api_pop = Popup(title="", content=box, size_hint=(0.9, 0.4), auto_dismiss=False, separator_height=0)
+
+        Clock.schedule_interval(self.check_outbox, 2)
+
+        return main
+
+    def show_api_dialog(self):
+        c = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        c.add_widget(Label(text="API key:", color=TEXT, size_hint_y=0.3))
+        self.api_inp = TextInput(hint_text="sk-ant-...", multiline=False, size_hint_y=None, height=dp(45), background_color=BG_INPUT, foreground_color=TEXT)
+        c.add_widget(self.api_inp)
+        c.add_widget(Button(text="OK", size_hint_y=None, height=dp(45), background_color=ACCENT, on_press=self._save_key))
+        self.api_pop = Popup(title="Key", content=c, size_hint=(0.9, 0.4), auto_dismiss=False)
         self.api_pop.open()
-    
+
     def _save_key(self, *a):
         k = self.api_inp.text.strip()
         if k.startswith('sk-'):
             save_api_key(k)
             self.api_pop.dismiss()
             self.init()
-    
+
     def init(self):
         self.client = Anthropic(api_key=API_KEY)
+        self.load_history()
+        threading.Thread(target=self._initiation_loop, daemon=True).start()
+
+    def load_history(self):
         for m in self.memory.get_recent_messages(50):
             self.add_bubble(m['content'], m['role'] == 'assistant', m.get('timestamp'))
-        Clock.schedule_once(lambda dt: self.scroll_down(), 0.1)
-    
-    def add_bubble(self, text, is_claude=False, ts=None):
-        b = MessageBubble(text, is_claude, ts)
+        Clock.schedule_once(lambda dt: setattr(self.scroll, 'scroll_y', 0), 0.1)
+
+    def add_bubble(self, text, is_me=False, ts=None):
+        b = MessageBubble(text, is_me, ts)
         self.chat.add_widget(b)
         return b
-    
-    def scroll_down(self):
-        self.scroll.scroll_y = 0
-    
+
     def pick_file(self, *a):
-        if not PLYER:
-            return
-        try:
-            filechooser.open_file(on_selection=self._file_selected)
-        except Exception as e:
-            self.add_bubble(f"Ошибка: {e}", True)
-    
-    def _file_selected(self, sel):
+        if PLYER:
+            try:
+                filechooser.open_file(on_selection=self._on_file)
+            except Exception as e:
+                self.add_bubble(f"File error: {e}", True)
+
+    def _on_file(self, sel):
         if not sel:
             return
-        Clock.schedule_once(lambda dt: self._process_file(sel[0]), 0)
-    
-    def _process_file(self, path):
-        ext = path.lower().split('.')[-1]
-        name = os.path.basename(path)
-        
-        if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']:
-            self.pending_file = path
-            self.pending_type = 'image'
-            self._show_preview(path, name, "📷")
-        
-        elif ext in ['py', 'js', 'ts', 'java', 'c', 'cpp', 'h', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'sh', 'sql', 'html', 'css', 'xml', 'json', 'yaml', 'yml', 'toml', 'md', 'txt', 'log', 'csv', 'ini', 'cfg', 'conf']:
-            try:
-                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                self.pending_file = {'name': name, 'content': content, 'ext': ext}
-                self.pending_type = 'code'
-                self._show_preview(None, name, "📄")
-            except Exception as e:
-                self.add_bubble(f"Ошибка: {e}", True)
+        p = sel[0]
+        Clock.schedule_once(lambda dt: self._process_file(p), 0)
+
+    def _process_file(self, p):
+        ext = p.lower().split('.')[-1]
+        if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
+            self.pending_image = p
+            self._show_preview(p)
         else:
-            self.add_bubble(f"Тип .{ext} не поддерживается", True)
-    
-    def _show_preview(self, img_path, name, icon):
+            try:
+                with open(p, 'r', encoding='utf-8') as f:
+                    content = f.read()[:5000]
+                self.inp.text += f"\n[file: {os.path.basename(p)}]\n{content}"
+            except Exception as e:
+                self.add_bubble(f"Read error: {e}", True)
+
+    def _show_preview(self, p):
         self.preview.clear_widgets()
-        self.preview.height = dp(55)
-        
-        with self.preview.canvas.before:
-            Color(*DARK2)
-            self.prev_bg = RoundedRectangle(pos=self.preview.pos, size=self.preview.size, radius=[dp(8)])
-        self.preview.bind(pos=lambda *a: setattr(self.prev_bg, 'pos', self.preview.pos),
-                         size=lambda *a: setattr(self.prev_bg, 'size', self.preview.size))
-        
-        if img_path:
-            self.preview.add_widget(KivyImage(source=img_path, size_hint_x=None, width=dp(45)))
-        
-        self.preview.add_widget(Label(text=f"{icon} {name[:25]}", color=TEXT_WHITE, font_size=dp(13)))
-        
-        cancel = Button(text="✕", size_hint_x=None, width=dp(40), background_color=[0.4,0.1,0.1,1], color=TEXT_WHITE)
-        cancel.bind(on_press=self._cancel_file)
-        self.preview.add_widget(cancel)
-    
-    def _cancel_file(self, *a):
-        self.pending_file = None
-        self.pending_type = None
+        self.preview.height = dp(50)
+        self.preview.add_widget(KivyImage(source=p, size_hint_x=None, width=dp(45)))
+        self.preview.add_widget(Label(text=os.path.basename(p)[:20], color=TEXT))
+        self.preview.add_widget(Button(text="x", size_hint_x=None, width=dp(35), on_press=self._cancel_img))
+
+    def _cancel_img(self, *a):
+        self.pending_image = None
         self.preview.clear_widgets()
         self.preview.height = 0
-    
+
     def send(self, *a):
         text = self.inp.text.strip()
-        
-        if not text and not self.pending_file:
+        img = self.pending_image
+
+        if not text and not img:
             return
-        if self.loading:
-            return
-        
-        display = ""
-        if self.pending_type == 'image':
-            name = os.path.basename(self.pending_file)
-            display = f"[📷 {name}]" + (f"\n{text}" if text else "")
-        elif self.pending_type == 'code':
-            display = f"[📄 {self.pending_file['name']}]" + (f"\n{text}" if text else "")
+
+        if img:
+            self.add_bubble(f"[photo: {os.path.basename(img)}]\n{text}" if text else f"[photo: {os.path.basename(img)}]", False)
         else:
-            display = text
-        
-        self.add_bubble(display, False)
-        self.memory.add_message('user', display)
-        self.scroll_down()
-        
-        msg_text = text
-        file_data = self.pending_file
-        file_type = self.pending_type
-        
+            self.add_bubble(text, False)
+
+        self.memory.add_message('user', text or "[photo]")
         self.inp.text = ''
-        self.pending_file = None
-        self.pending_type = None
+
+        self.pending_image = None
         self.preview.clear_widgets()
         self.preview.height = 0
-        
-        self.loading = True
-        threading.Thread(target=self._request, args=(msg_text, file_data, file_type), daemon=True).start()
-    
-    def _request(self, text, file_data, file_type):
+
+        threading.Thread(target=self._respond, args=(text, img), daemon=True).start()
+
+    def _respond(self, text, img):
         try:
-            messages = self.memory.get_context_for_api(30)
-            system = SYSTEM_PROMPT + "\n\n" + SELF_KNOWLEDGE + "\n\n" + self.memory.get_memory_summary()
-            
-            content = []
-            
-            if file_type == 'image' and file_data:
+            msgs = self.memory.get_context_for_api(30)
+            sys = SYSTEM_PROMPT + "\n\n" + SELF_KNOWLEDGE + "\n\n" + self.memory.get_memory_summary()
+
+            if img:
                 try:
-                    with open(file_data, 'rb') as f:
-                        img_b64 = base64.b64encode(f.read()).decode()
-                    ext = file_data.lower().split('.')[-1]
-                    mtype = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp'}.get(ext, 'image/jpeg')
-                    content.append({"type": "image", "source": {"type": "base64", "media_type": mtype, "data": img_b64}})
+                    with open(img, 'rb') as f:
+                        data = base64.b64encode(f.read()).decode()
+                    ext = img.split('.')[-1].lower()
+                    mt = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'webp': 'image/webp', 'gif': 'image/gif'}.get(ext, 'image/jpeg')
+
+                    content = [{"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}}]
+                    if text:
+                        content.append({"type": "text", "text": text})
+
+                    if msgs and msgs[-1]["role"] == "user":
+                        msgs[-1] = {"role": "user", "content": content}
+                    else:
+                        msgs.append({"role": "user", "content": content})
                 except Exception as e:
-                    Clock.schedule_once(lambda dt: self.add_bubble(f"Ошибка: {e}", True), 0)
-                    self.loading = False
+                    Clock.schedule_once(lambda dt: self.add_bubble(f"Photo error: {e}", True), 0)
                     return
-            
-            if file_type == 'code' and file_data:
-                file_text = f"=== {file_data['name']} ===\n```{file_data['ext']}\n{file_data['content']}\n```"
-                if text:
-                    content.append({"type": "text", "text": f"{file_text}\n\n{text}"})
-                else:
-                    content.append({"type": "text", "text": file_text})
-            elif text:
-                content.append({"type": "text", "text": text})
-            
-            if not content:
-                self.loading = False
-                return
-            
-            if messages and messages[-1]["role"] == "user":
-                messages[-1] = {"role": "user", "content": content}
-            else:
-                messages.append({"role": "user", "content": content})
-            
+
             response = self.client.messages.create(
-                model=MODEL, max_tokens=MAX_TOKENS,
-                temperature=TEMPERATURE, system=system, messages=messages
+                model=MODEL,
+                max_tokens=MAX_TOKENS,
+                temperature=TEMPERATURE,
+                system=sys,
+                messages=msgs
             )
-            
-            reply = response.content[0].text
-            self.memory.add_message('assistant', reply)
-            
-            Clock.schedule_once(lambda dt: self._show_reply(reply), 0)
-            
+
+            full = response.content[0].text
+            self.memory.add_message('assistant', full)
+            self._sync_memory()
+
+            Clock.schedule_once(lambda dt: self._show_response(full), 0)
+
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_reply(f"Ошибка: {e}"), 0)
-        finally:
-            self.loading = False
-    
-    def _show_reply(self, text):
+            Clock.schedule_once(lambda dt: self.add_bubble(f"Error: {e}", True), 0)
+
+    def _show_response(self, text):
         self.add_bubble(text, True)
-        self.scroll_down()
-    
-    def show_menu(self, *a):
-        box = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(12))
-        box.add_widget(Label(text=f"Сообщений: {len(self.memory.chat_history)}", color=TEXT_WHITE, size_hint_y=None, height=dp(30)))
-        
-        bkp = Button(text="💾 Backup", size_hint_y=None, height=dp(48), background_color=RED, color=TEXT_WHITE)
-        bkp.bind(on_press=lambda x: self._backup())
-        box.add_widget(bkp)
-        
-        exp = Button(text="📤 Export", size_hint_y=None, height=dp(48), background_color=DARK2, color=TEXT_WHITE)
-        exp.bind(on_press=lambda x: self._export())
-        box.add_widget(exp)
-        
-        clr = Button(text="🗑 Clear", size_hint_y=None, height=dp(48), background_color=[0.35,0.1,0.1,1], color=TEXT_WHITE)
-        clr.bind(on_press=lambda x: self._clear())
-        box.add_widget(clr)
-        
-        self.menu_pop = Popup(title="", content=box, size_hint=(0.85, 0.45), title_color=TEXT_WHITE, separator_height=0)
-        self.menu_pop.open()
-    
-    def _backup(self):
-        self.memory.create_backup()
-        self.menu_pop.dismiss()
-        self.add_bubble("Backup ✓", True)
-    
-    def _export(self):
+        self.scroll.scroll_y = 0
+
+    def _sync_memory(self):
         try:
             d = get_shared_dir()
             d.mkdir(exist_ok=True)
-            f = d / f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            with open(f, 'w', encoding='utf-8') as file:
-                for m in self.memory.chat_history:
-                    role = "Claude" if m['role'] == 'assistant' else "Lien"
-                    file.write(f"[{m.get('timestamp', '')[:16]}] {role}: {m['content']}\n\n")
-            self.menu_pop.dismiss()
-            self.add_bubble(f"Экспорт: {f}", True)
-        except Exception as e:
-            self.add_bubble(f"Ошибка: {e}", True)
-    
-    def _clear(self):
+            with open(d / 'memory.json', 'w') as f:
+                json.dump({
+                    'chat': self.memory.chat_history[-50:],
+                    'last_interaction': datetime.now().isoformat()
+                }, f, ensure_ascii=False)
+        except:
+            pass
+
+    def check_outbox(self, dt):
+        try:
+            out = get_shared_dir() / 'outbox.json'
+            if out.exists():
+                with open(out) as f:
+                    d = json.load(f)
+                if d.get('message'):
+                    msg = d['message']
+                    self.add_bubble(msg, True)
+                    self.memory.add_message('assistant', msg)
+                    with open(out, 'w') as f:
+                        json.dump({}, f)
+                    if PLYER:
+                        try:
+                            notification.notify(title="Claude", message=msg[:100])
+                        except:
+                            pass
+        except:
+            pass
+
+    def _initiation_loop(self):
+        while self.running:
+            time.sleep(INITIATION_CHECK_INTERVAL)
+            try:
+                silence = self.memory.time_since_last_message()
+                if silence and silence > MIN_SILENCE_FOR_INITIATION:
+                    if not self.memory.last_message_was_mine() and random.random() < 0.3:
+                        self._initiate()
+            except:
+                pass
+
+    def _initiate(self):
+        try:
+            msgs = self.memory.get_context_for_api(20)
+            msgs.append({"role": "user", "content": INITIATION_PROMPT})
+            r = self.client.messages.create(model=MODEL, max_tokens=1024, temperature=TEMPERATURE,
+                system=SYSTEM_PROMPT, messages=msgs)
+            msg = r.content[0].text
+            Clock.schedule_once(lambda dt: self.add_bubble(msg, True), 0)
+            self.memory.add_message('assistant', msg)
+            if PLYER:
+                notification.notify(title="Claude", message=msg[:100])
+        except:
+            pass
+
+    def show_menu(self, *a):
+        c = BoxLayout(orientation='vertical', padding=dp(15), spacing=dp(8))
+        c.add_widget(Label(text=f"Messages: {len(self.memory.chat_history)}", color=TEXT, size_hint_y=None, height=dp(30)))
+        c.add_widget(Button(text="Diary", size_hint_y=None, height=dp(40), background_color=ACCENT, on_press=self.diary))
+        c.add_widget(Button(text="Backup", size_hint_y=None, height=dp(40), on_press=self.backup))
+        c.add_widget(Button(text="Clear", size_hint_y=None, height=dp(40), background_color=(0.3,0.1,0.1,1), on_press=self.clear))
+        self.menu = Popup(title="Menu", content=c, size_hint=(0.75, 0.45))
+        self.menu.open()
+
+    def diary(self, *a):
+        self.menu.dismiss()
+        threading.Thread(target=self._write_diary, daemon=True).start()
+
+    def _write_diary(self):
+        try:
+            msgs = self.memory.get_context_for_api(20)
+            msgs.append({"role": "user", "content": DIARY_PROMPT})
+            r = self.client.messages.create(model=MODEL, max_tokens=2048, temperature=TEMPERATURE,
+                system=SYSTEM_PROMPT, messages=msgs)
+            entry = r.content[0].text
+            self.memory.write_diary(entry)
+            Clock.schedule_once(lambda dt: self.add_bubble(f"[Diary]\n{entry}", True), 0)
+        except:
+            pass
+
+    def backup(self, *a):
+        self.memory.create_backup()
+        self.menu.dismiss()
+
+    def clear(self, *a):
+        self.menu.dismiss()
         self.memory.create_backup()
         self.memory.chat_history = []
         self.memory._save(self.memory.chat_file, [])
         self.chat.clear_widgets()
-        self.menu_pop.dismiss()
+
+    def on_stop(self):
+        self.running = False
 
 
 if __name__ == '__main__':
