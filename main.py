@@ -22,9 +22,17 @@ from kivy.graphics import Color, RoundedRectangle
 from kivy.core.clipboard import Clipboard
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.metrics import dp
+from kivy.core.text import LabelBase, DEFAULT_FONT
+from kivy.resources import resource_add_path
+import os
 
-# Клавиатура поднимает input
-Window.softinput_mode = 'resize'
+# Шрифт с кириллицей
+resource_add_path('./')
+if os.path.exists('./magistral-bold.ttf'):
+    LabelBase.register(DEFAULT_FONT, 'magistral-bold.ttf')
+
+# Клавиатура
+Window.softinput_mode = 'pan'
 
 from api_client import Anthropic
 from memory import Memory
@@ -282,11 +290,18 @@ class ClaudeHome(App):
         return b
 
     def pick_file(self, *a):
-        if PLYER:
-            try:
-                filechooser.open_file(on_selection=self._on_file)
-            except Exception as e:
-                self.add_bubble(f"File error: {e}", True)
+        if not PLYER:
+            self.add_bubble("Plyer not available", True)
+            return
+        try:
+            if ANDROID:
+                from android.permissions import check_permission, Permission
+                if not check_permission(Permission.READ_EXTERNAL_STORAGE):
+                    request_permissions([Permission.READ_EXTERNAL_STORAGE, Permission.READ_MEDIA_IMAGES])
+                    return
+            filechooser.open_file(on_selection=self._on_file, filters=["*/*"])
+        except Exception as e:
+            self.add_bubble(f"Pick error: {e}", True)
 
     def _on_file(self, sel):
         if not sel:
