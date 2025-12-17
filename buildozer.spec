@@ -3,7 +3,7 @@ title = Claude Home
 package.name = claude_home
 package.domain = org.alina
 source.dir = .
-source.include_exts = py,png,jpg,kv,json,.ttf,.otf
+source.include_exts = py,png,jpg,kv,json,ttf,otf
 version = 2.0
 requirements = python3,kivy==2.2.1,requests,plyer,certifi,pillow,pyjnius
 orientation = portrait
