@@ -5,7 +5,7 @@ package.domain = org.alina
 source.dir = .
 source.include_exts = py,png,jpg,kv,json,ttf
 version = 2.0
-requirements = python3,kivy==2.2.1,requests,plyer,certifi,pillow,pyjnius
+requirements = python3,kivy==2.3.0,requests,urllib3,charset-normalizer,idna,certifi,plyer,pillow,pyjnius
 orientation = portrait
 fullscreen = 0
 android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE,CAMERA,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE
