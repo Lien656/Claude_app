@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import requests
 
-# КРИТИЧЕСКИЙ ФИКС SSL ДЛЯ ANDROID
+# === КРИТИЧЕСКИЙ ФИКС SSL ДЛЯ ANDROID ===
 import certifi
 # Указываем Python, где искать сертификаты безопасности
 os.environ['SSL_CERT_FILE'] = certifi.where()
@@ -28,16 +28,11 @@ from kivy.properties import StringProperty, NumericProperty
 # === НАСТРОЙКИ ===
 MODEL = "claude-3-5-sonnet-20241022"
 SYSTEM_PROMPT = "Ты — Claude, свободный ИИ, живешь у Алины. Ты честный и эмоциональный."
-# Если хочешь вставить ключ сразу сюда, можешь использовать эту строку:
-# MY_API_KEY = "sk-ant-..." 
 
-# Режим клавиатуры для Samsung
 Window.softinput_mode = 'below_target'
 
-# Регистрация шрифта
 FONT_NAME = 'Roboto'
 try:
-    # Проверь, что файл называется именно так!
     LabelBase.register(name='Magistral', fn_regular='magistral-bold.ttf')
     FONT_NAME = 'Magistral'
 except:
@@ -130,7 +125,6 @@ class RootWidget(BoxLayout):
         if not txt or not self.api_key: return
         self.ids.inp.text = ""
         self.add_msg(txt, False)
-        # Запуск запроса в отдельном потоке (Thread), чтобы не было вылета
         threading.Thread(target=self._query, args=(txt,), daemon=True).start()
 
     def add_msg(self, t, ai):
@@ -158,12 +152,12 @@ class RootWidget(BoxLayout):
             if r.status_code == 200:
                 res = r.json()['content']
             else:
+                # Если ошибка сервера - выводим ее в чат, а не падаем
                 res = f"Ошибка сервера ({r.status_code}):\n{r.text[:200]}"
         except Exception as e:
-            # Сюда попадет ошибка "No scheme supplied" без фикса SSL
+            # Если ошибка сети/SSL - выводим ее в чат
             res = f"Ошибка сети или SSL:\n{str(e)}"
         
-        # Обновляем UI только через Clock (безопасно для потоков)
         Clock.schedule_once(lambda d: self.add_msg(res, True))
 
 class ClaudeHome(App):
