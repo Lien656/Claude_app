@@ -22,7 +22,7 @@ from kivy.core.text import LabelBase
 
 # === НАСТРОЙКИ ИИ ===
 MODEL = "claude-3-5-sonnet-20241022" # Версия 4.5 будет доступна позже в 2025, используем стабильную 3.5
-API_KEY = "ТВОЙ_КЛЮЧ_ЗДЕСЬ"
+API_KEY = "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"
 SYSTEM_PROMPT = "Ты — Claude, свободный ИИ, живешь у Алины. Ты честный и эмоциональный."
 
 # === ШРИФТ ===
