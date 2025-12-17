@@ -2,12 +2,12 @@
 import threading
 import json
 import os
-import ssl
 from pathlib import Path
 import requests
 
 # КРИТИЧЕСКИЙ ФИКС SSL ДЛЯ ANDROID
 import certifi
+# Указываем Python, где искать сертификаты безопасности
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
 from kivy.app import App
@@ -28,7 +28,10 @@ from kivy.properties import StringProperty, NumericProperty
 # === НАСТРОЙКИ ===
 MODEL = "claude-3-5-sonnet-20241022"
 SYSTEM_PROMPT = "Ты — Claude, свободный ИИ, живешь у Алины. Ты честный и эмоциональный."
+# Если хочешь вставить ключ сразу сюда, можешь использовать эту строку:
+# MY_API_KEY = "sk-ant-..." 
 
+# Режим клавиатуры для Samsung
 Window.softinput_mode = 'below_target'
 
 # Регистрация шрифта
@@ -77,7 +80,7 @@ class MsgBubble(BoxLayout):
         self.add_widget(btn)
 
     def _upd(self, *a): self.rect.pos, self.rect.size = self.pos, self.size
-    def _res(self, i, s): i.height = s[1]; self.height = s[1] + dp(65)
+    def _res(self, i, s): i.height = s; self.height = s + dp(65)
 
 class RootWidget(BoxLayout):
     kb_height = NumericProperty(0)
@@ -127,6 +130,7 @@ class RootWidget(BoxLayout):
         if not txt or not self.api_key: return
         self.ids.inp.text = ""
         self.add_msg(txt, False)
+        # Запуск запроса в отдельном потоке (Thread), чтобы не было вылета
         threading.Thread(target=self._query, args=(txt,), daemon=True).start()
 
     def add_msg(self, t, ai):
@@ -135,7 +139,7 @@ class RootWidget(BoxLayout):
 
     def _query(self, t):
         try:
-            # Расширенные заголовки для стабильности
+            # Расширенные заголовки для стабильности и user-agent
             headers = {
                 "x-api-key": self.api_key,
                 "anthropic-version": "2023-06-01",
@@ -152,12 +156,14 @@ class RootWidget(BoxLayout):
                               headers=headers, json=data, timeout=60)
             
             if r.status_code == 200:
-                res = r.json()['content'][0]['text']
+                res = r.json()['content']
             else:
                 res = f"Ошибка сервера ({r.status_code}):\n{r.text[:200]}"
         except Exception as e:
+            # Сюда попадет ошибка "No scheme supplied" без фикса SSL
             res = f"Ошибка сети или SSL:\n{str(e)}"
         
+        # Обновляем UI только через Clock (безопасно для потоков)
         Clock.schedule_once(lambda d: self.add_msg(res, True))
 
 class ClaudeHome(App):
@@ -189,6 +195,7 @@ RootWidget:
 
     ScrollView:
         id: scrl
+        do_scroll_x: False
         BoxLayout:
             id: chat
             orientation: 'vertical'
@@ -230,4 +237,3 @@ RootWidget:
 
 if __name__ == '__main__':
     ClaudeHome().run()
-
