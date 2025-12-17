@@ -133,7 +133,7 @@ class MsgBubble(BoxLayout):
 
 class RootWidget(BoxLayout):
     keyboard_height = NumericProperty(0)
-    api_key = ""
+    api_key = "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"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
