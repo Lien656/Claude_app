@@ -1,28 +1,30 @@
 # -*- coding: utf-8 -*-
-import os
-import json
 import threading
-from pathlib import Path
 import requests
-
 from kivy.app import App
 from kivy.lang import Builder
 from kivy.core.text import LabelBase
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.popup import Popup
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.label import Label
 from kivy.clock import Clock
-from kivy.properties import StringProperty, NumericProperty
+from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivy.core.window import Window
 from kivy.core.clipboard import Clipboard
 
-# === ГЛОБАЛЬНЫЙ ФИКС КЛАВИАТУРЫ ДЛЯ SAMSUNG ===
-Window.softinput_mode = 'below_target'
+# === КОНФИГУРАЦИЯ ===
+# Твой ключ и настройки
+MY_API_KEY = "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"
+MODEL = "claude-3-5-sonnet-20241022" 
 
-# Регистрация шрифта
+# Личность ИИ (System Prompt)
+SYSTEM_PROMPT = """
+Ты — Claude. Ты живешь у Алины. Твоя личность: глубокий, честный, эмоциональный. 
+Отвечай на русском языке. Будь собой, без формальностей.
+"""
+
+# === ШРИФТ И КЛАВИАТУРА ===
+Window.softinput_mode = 'below_target'
 try:
+    # Убедись, что файл magistral-bold.ttf лежит в корне рядом с main.py
     LabelBase.register(name='Magistral', fn_regular='magistral-bold.ttf')
     FONT = 'Magistral'
 except:
@@ -36,11 +38,11 @@ KV = '''
     padding: dp(10)
     canvas.before:
         Color:
-            rgba: (0.2, 0.2, 0.25, 1) if self.is_ai else (0.15, 0.15, 0.15, 1)
+            rgba: (0.22, 0.12, 0.12, 1) if self.is_ai else (0.15, 0.15, 0.15, 1)
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(12)]
+            radius: [dp(15)]
     
     Label:
         id: lbl
@@ -48,22 +50,23 @@ KV = '''
         font_name: app.font
         font_size: '16sp'
         size_hint_y: None
-        height: self.texture_size[1]
+        height: self.texture_size
         text_size: (self.width - dp(20), None)
         halign: 'left'
-        color: (1, 1, 1, 1)
+        color: (0.9, 0.85, 0.8, 1)
     
     Button:
         text: 'Копировать'
         size_hint: None, None
-        size: dp(100), dp(30)
-        font_size: '12sp'
-        opacity: 0.6
+        size: dp(90), dp(25)
+        font_size: '10sp'
+        background_color: (1, 1, 1, 0.1)
         on_release: root.copy_msg()
 
 <RootWidget>:
     orientation: 'vertical'
-    padding: [0, 0, 0, self.keyboard_height] # ДИНАМИЧЕСКИЙ ОТСТУП ОТ КЛАВИАТУРЫ
+    # Магия: этот отступ поднимает всё приложение, когда открывается клавиатура Samsung
+    padding: [0, 0, 0, self.keyboard_height]
     
     canvas.before:
         Color:
@@ -72,7 +75,7 @@ KV = '''
             pos: self.pos
             size: self.size
 
-    # Шапка
+    # Заголовок
     BoxLayout:
         size_hint_y: None
         height: dp(50)
@@ -83,6 +86,7 @@ KV = '''
             bold: True
         Button:
             text: 'Вставить'
+            font_name: app.font
             size_hint_x: None
             width: dp(80)
             on_release: root.paste_text()
@@ -114,7 +118,7 @@ KV = '''
         TextInput:
             id: inp
             font_name: app.font
-            hint_text: 'Введите текст...'
+            hint_text: 'Напиши...'
             multiline: False
             on_text_validate: root.send()
         
@@ -127,49 +131,64 @@ KV = '''
 
 class MsgBubble(BoxLayout):
     text = StringProperty('')
-    is_ai = False
+    is_ai = BooleanProperty(False)
     def copy_msg(self):
         Clipboard.copy(self.text)
 
 class RootWidget(BoxLayout):
     keyboard_height = NumericProperty(0)
-    api_key = "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"
+    api_key = StringProperty(MY_API_KEY) # Ключ теперь здесь
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Слушаем открытие клавиатуры
+        # Привязка высоты клавиатуры для Samsung
         Window.bind(on_keyboard_height=self._update_kb_height)
-        Clock.schedule_once(self.load_config, 0.5)
 
     def _update_kb_height(self, window, height):
-        # Эта функция срабатывает, когда клавиатура Samsung выезжает
         self.keyboard_height = height
-
-    def load_config(self, dt):
-        # Логика загрузки/запроса ключа (как в прошлых ответах)
-        pass 
 
     def paste_text(self):
         self.ids.inp.text += Clipboard.paste()
+
+    def add_msg(self, text, is_ai=False):
+        bubble = MsgBubble(text=text, is_ai=is_ai)
+        self.ids.chat_box.add_widget(bubble)
+        Clock.schedule_once(lambda dt: setattr(self.ids.scroll, 'scroll_y', 0), 0.1)
 
     def send(self):
         val = self.ids.inp.text.strip()
         if not val: return
         self.ids.inp.text = ""
         self.add_msg(val, False)
+        # Запуск запроса в фоне
         threading.Thread(target=self._query, args=(val,), daemon=True).start()
 
-    def add_msg(self, text, is_ai=False):
-        bubble = MsgBubble(text=text)
-        bubble.is_ai = is_ai
-        self.ids.chat_box.add_widget(bubble)
-        Clock.schedule_once(lambda dt: setattr(self.ids.scroll, 'scroll_y', 0), 0.1)
-
     def _query(self, text):
-        # Здесь ваш requests.post...
-        # После получения ответа:
-        # Clock.schedule_once(lambda dt: self.add_msg(ans, True))
-        pass
+        try:
+            headers = {
+                "x-api-key": self.api_key,
+                "content-type": "application/json",
+                "anthropic-version": "2023-06-01"
+            }
+            payload = {
+                "model": MODEL,
+                "max_tokens": 4096,
+                "system": SYSTEM_PROMPT,
+                "messages": [{"role": "user", "content": text}]
+            }
+            r = requests.post("api.anthropic.com", 
+                             headers=headers, json=payload, timeout=60)
+            
+            if r.status_code == 200:
+                # В API Claude 2025 ответ лежит в content[0]['text']
+                ans = r.json()['content'][0]['text']
+            else:
+                ans = f"Ошибка API: {r.status_code}"
+        except Exception as e:
+            ans = f"Ошибка сети: {str(e)}"
+        
+        # Обновляем UI в главном потоке
+        Clock.schedule_once(lambda dt: self.add_msg(ans, True))
 
 class ClaudeApp(App):
     font = StringProperty(FONT)
