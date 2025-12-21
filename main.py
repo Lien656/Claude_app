@@ -13,7 +13,7 @@ from kivy.config import Config
 Config.set('kivy', 'keyboard_mode', 'systemanddock')
 
 from kivy.core.window import Window
-Window.softinput_mode = 'below_target'
+Window.softinput_mode = 'resize'
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
@@ -267,19 +267,10 @@ class ClaudeHome(App):
         self.inp_row = inp_row
         self.root = root
         
-        # Keyboard tracking
-        Window.bind(on_keyboard_height=self.on_kb)
+        # Keyboard - resize mode handles it
         
         Clock.schedule_once(self.init, 0.3)
         return root
-    
-    def on_kb(self, win, height):
-        # Двигаем весь root вверх на высоту клавиатуры
-        if height > 0:
-            self.root.padding = [0, 0, 0, height]
-        else:
-            self.root.padding = [0, 0, 0, 0]
-        Clock.schedule_once(lambda dt: self.scroll_down(), 0.1)
     
     def init(self, dt):
         if not API_KEY:
