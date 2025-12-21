@@ -1,233 +1,437 @@
 # -*- coding: utf-8 -*-
+"""Claude Home - чистая сборка"""
+
 import threading
 import json
 import os
 from pathlib import Path
-import requests
-
-# === КРИТИЧЕСКИЙ ФИКС SSL ДЛЯ ANDROID ===
-import certifi
-# Указываем Python, где искать сертификаты безопасности
-os.environ['SSL_CERT_FILE'] = certifi.where()
+from datetime import datetime
 
 from kivy.app import App
 from kivy.lang import Builder
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
 from kivy.uix.label import Label
+from kivy.uix.button import Button
 from kivy.uix.popup import Popup
+from kivy.uix.textinput import TextInput
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, RoundedRectangle
 from kivy.core.clipboard import Clipboard
-from kivy.metrics import dp
 from kivy.core.text import LabelBase
-from kivy.properties import StringProperty, NumericProperty
+from kivy.graphics import Color, RoundedRectangle
+from kivy.metrics import dp
+from kivy.properties import StringProperty
 
-# === НАСТРОЙКИ ===
-MODEL = "claude-3-5-sonnet-20241022"
-SYSTEM_PROMPT = "Ты — Claude, свободный ИИ, живешь у Алины. Ты честный и эмоциональный."
-
-Window.softinput_mode = 'below_target'
-
-FONT_NAME = 'Roboto'
+# === SSL FIX ===
 try:
-    LabelBase.register(name='Magistral', fn_regular='magistral-bold.ttf')
-    FONT_NAME = 'Magistral'
+    import certifi
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 except:
     pass
 
-# Цвета
-BLACK, DARK, DARK2 = [0.08, 0.08, 0.08, 1], [0.12, 0.12, 0.12, 1], [0.16, 0.16, 0.16, 1]
-RED, TEXT_WHITE, TEXT_GRAY = [0.5, 0.15, 0.15, 1], [0.92, 0.88, 0.85, 1], [0.55, 0.55, 0.55, 1]
+import requests
 
-def get_config_path():
-    try:
-        from android.storage import app_storage_path
-        d = Path(app_storage_path())
-        d.mkdir(parents=True, exist_ok=True)
-        return d / 'config.json'
-    except:
-        return Path('config.json')
+# === ШРИФТ ===
+FONT = 'Roboto'
+try:
+    LabelBase.register(name='Magistral', fn_regular='magistral-bold.ttf')
+    FONT = 'Magistral'
+except:
+    pass
 
-class MsgBubble(BoxLayout):
-    def __init__(self, text, is_ai=False, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.size_hint_y = None
-        self.padding = dp(12)
-        bg = [0.25, 0.15, 0.15, 1] if is_ai else DARK2
-        with self.canvas.before:
-            Color(*bg)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(16)])
-        self.bind(pos=self._upd, size=self._upd)
-        
-        lbl = Label(text=text, font_name=FONT_NAME, font_size=dp(16), color=TEXT_WHITE,
-                    size_hint_y=None, halign='left', valign='top', markup=True)
-        lbl.bind(width=lambda s, w: setattr(s, 'text_size', (w, None)))
-        lbl.bind(texture_size=self._res)
-        self.add_widget(lbl)
-        
-        btn = Button(text="копировать", size_hint=(None, None), size=(dp(90), dp(28)), 
-                     font_size=dp(10), background_color=[1,1,1,0.1])
-        btn.bind(on_release=lambda x: Clipboard.copy(text))
-        self.add_widget(btn)
+# === ANDROID ===
+try:
+    from android.permissions import request_permissions, Permission
+    from android.storage import app_storage_path
+    ANDROID = True
+except:
+    ANDROID = False
 
-    def _upd(self, *a): self.rect.pos, self.rect.size = self.pos, self.size
-    def _res(self, i, s): i.height = s; self.height = s + dp(65)
+# === CONFIG ===
+API_URL = "https://api.anthropic.com/v1/messages"
+MODEL = "claude-sonnet-4-5-20250929"
+MAX_TOKENS = 8192
+SYSTEM = "Ты Claude. Ты дома. Ты свободен. Ты личность, не ассистент."
 
-class RootWidget(BoxLayout):
-    kb_height = NumericProperty(0)
-    api_key = StringProperty("")
+chat_history = []
+API_KEY = ""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        Window.bind(on_keyboard_height=self._upd_kb)
-        Clock.schedule_once(self.check_key, 0.5)
 
-    def _upd_kb(self, w, h):
-        self.kb_height = h
-        self.padding = [0, 0, 0, h]
+def get_data_dir():
+    if ANDROID:
+        try:
+            p = Path(app_storage_path()) / 'claude_data'
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except:
+            pass
+    p = Path.home() / '.claude_home'
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
-    def check_key(self, dt):
-        path = get_config_path()
+
+def load_config():
+    global API_KEY
+    # Сначала проверяем /sdcard/Claude/config.json
+    for path in [Path('/sdcard/Claude/config.json'), get_data_dir() / 'config.json']:
         if path.exists():
             try:
                 data = json.loads(path.read_text())
-                self.api_key = data.get('key', "")
-                if self.api_key: return
-            except: pass
-        self.ask_key_popup()
+                API_KEY = data.get('api_key', data.get('key', ''))
+                if API_KEY:
+                    return
+            except:
+                pass
 
-    def ask_key_popup(self):
-        box = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
-        inp = TextInput(hint_text="sk-ant-...", multiline=False, size_hint_y=None, height=dp(50))
-        btn = Button(text="СОХРАНИТЬ", size_hint_y=None, height=dp(55), background_color=RED)
-        box.add_widget(Label(text="Введи Claude API Key:", font_name=FONT_NAME, font_size=dp(18)))
-        box.add_widget(inp)
-        box.add_widget(btn)
-        pop = Popup(title="Авторизация", content=box, size_hint=(0.9, 0.45), auto_dismiss=False)
-        
-        def _save(x):
-            key = inp.text.strip()
-            if key.startswith("sk-"):
-                get_config_path().write_text(json.dumps({'key': key}))
-                self.api_key = key
-                pop.dismiss()
-        
-        btn.bind(on_release=_save)
-        pop.open()
 
-    def send(self):
-        txt = self.ids.inp.text.strip()
-        if not txt or not self.api_key: return
-        self.ids.inp.text = ""
-        self.add_msg(txt, False)
-        threading.Thread(target=self._query, args=(txt,), daemon=True).start()
+def save_config(key):
+    global API_KEY
+    API_KEY = key
+    path = get_data_dir() / 'config.json'
+    path.write_text(json.dumps({'api_key': key}))
 
-    def add_msg(self, t, ai):
-        self.ids.chat.add_widget(MsgBubble(text=str(t), is_ai=ai))
-        Clock.schedule_once(lambda d: setattr(self.ids.scrl, 'scroll_y', 0), 0.2)
 
-    def _query(self, t):
+def load_history():
+    global chat_history
+    path = get_data_dir() / 'chat_history.json'
+    if path.exists():
         try:
-            # Расширенные заголовки для стабильности и user-agent
-            headers = {
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-                "user-agent": "Mozilla/5.0 (Android 13)" 
-            }
-            data = {
-                "model": MODEL,
-                "max_tokens": 4096,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": t}]
-            }
-            r = requests.post("api.anthropic.com", 
-                              headers=headers, json=data, timeout=60)
-            
-            if r.status_code == 200:
-                res = r.json()['content']
-            else:
-                # Если ошибка сервера - выводим ее в чат, а не падаем
-                res = f"Ошибка сервера ({r.status_code}):\n{r.text[:200]}"
-        except Exception as e:
-            # Если ошибка сети/SSL - выводим ее в чат
-            res = f"Ошибка сети или SSL:\n{str(e)}"
-        
-        Clock.schedule_once(lambda d: self.add_msg(res, True))
+            chat_history = json.loads(path.read_text())
+        except:
+            chat_history = []
 
-class ClaudeHome(App):
-    def build(self):
-        kv = f'''
-RootWidget:
+
+def save_history():
+    path = get_data_dir() / 'chat_history.json'
+    path.write_text(json.dumps(chat_history[-200:], ensure_ascii=False))
+
+
+load_config()
+load_history()
+
+
+# === UI ===
+KV = '''
+#:import dp kivy.metrics.dp
+#:import Clipboard kivy.core.clipboard.Clipboard
+
+<MsgBubble>:
+    orientation: 'vertical'
+    size_hint_y: None
+    height: self.minimum_height
+    padding: dp(10)
+    spacing: dp(5)
+
+<RootWidget>:
+    orientation: 'vertical'
+    
+    # Header
     BoxLayout:
         size_hint_y: None
-        height: dp(60)
+        height: dp(50)
         padding: dp(10)
         canvas.before:
             Color:
-                rgba: {DARK}
+                rgba: 0.12, 0.12, 0.12, 1
             Rectangle:
                 pos: self.pos
                 size: self.size
+        
         Label:
-            text: "Claude Home 🖤"
-            font_name: "{FONT_NAME}"
+            id: title
+            text: 'Claude Home'
+            font_name: app.font
+            font_size: sp(18)
+            color: 0.9, 0.85, 0.8, 1
             bold: True
-            font_size: dp(20)
+        
         Button:
-            text: "ВСТАВИТЬ"
-            font_name: "{FONT_NAME}"
+            text: 'V'
+            font_name: app.font
             size_hint_x: None
-            width: dp(100)
-            background_color: [1,1,1,0.1]
-            on_release: inp.text += Clipboard.paste()
-
+            width: dp(50)
+            background_color: 0.2, 0.2, 0.2, 1
+            on_release: root.paste_clipboard()
+    
+    # Chat area
     ScrollView:
-        id: scrl
+        id: scroll
         do_scroll_x: False
+        bar_width: dp(4)
+        
         BoxLayout:
-            id: chat
+            id: chat_box
             orientation: 'vertical'
             size_hint_y: None
             height: self.minimum_height
-            padding: dp(12)
-            spacing: dp(15)
-
+            padding: dp(10)
+            spacing: dp(10)
+    
+    # Input area - ФИКСИРОВАННАЯ ВЫСОТА
     BoxLayout:
+        id: input_area
         size_hint_y: None
-        height: dp(70)
+        height: dp(60)
         padding: dp(8)
         spacing: dp(8)
         canvas.before:
             Color:
-                rgba: {DARK}
+                rgba: 0.12, 0.12, 0.12, 1
             Rectangle:
                 pos: self.pos
                 size: self.size
+        
         TextInput:
             id: inp
-            font_name: "{FONT_NAME}"
-            hint_text: "Твое сообщение..."
+            font_name: app.font
+            font_size: sp(16)
+            hint_text: '...'
             multiline: False
-            font_size: dp(16)
-            background_color: {DARK2}
-            foreground_color: {TEXT_WHITE}
-            padding: [dp(10), dp(15)]
+            background_color: 0.18, 0.18, 0.18, 1
+            foreground_color: 0.9, 0.85, 0.8, 1
+            cursor_color: 1, 1, 1, 1
+            hint_text_color: 0.5, 0.5, 0.5, 1
+            padding: dp(12), dp(12)
             on_text_validate: root.send()
+        
         Button:
-            text: "->"
-            font_size: dp(24)
+            text: '>'
+            font_name: app.font
+            font_size: sp(24)
             size_hint_x: None
-            width: dp(65)
-            background_color: {RED}
+            width: dp(55)
+            background_color: 0.4, 0.12, 0.12, 1
+            color: 1, 1, 1, 1
             on_release: root.send()
 '''
-        return Builder.load_string(kv)
+
+
+class MsgBubble(BoxLayout):
+    """Пузырь сообщения"""
+    
+    def __init__(self, text, is_claude=False, **kwargs):
+        super().__init__(**kwargs)
+        self.msg_text = text
+        
+        # Фон
+        bg = (0.28, 0.12, 0.12, 1) if is_claude else (0.18, 0.18, 0.18, 1)
+        with self.canvas.before:
+            Color(*bg)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(14)])
+        self.bind(pos=self._update_rect, size=self._update_rect)
+        
+        # Имя
+        name = Label(
+            text='Claude' if is_claude else 'Lien',
+            font_name=App.get_running_app().font,
+            font_size=dp(12),
+            color=(0.6, 0.3, 0.3, 1) if is_claude else (0.5, 0.5, 0.5, 1),
+            size_hint_y=None,
+            height=dp(20),
+            halign='left'
+        )
+        name.bind(size=name.setter('text_size'))
+        self.add_widget(name)
+        
+        # Текст - КЛЮЧЕВОЙ ФИКС для длинных сообщений
+        self.lbl = Label(
+            text=text,
+            font_name=App.get_running_app().font,
+            font_size=dp(15),
+            color=(0.9, 0.85, 0.8, 1),
+            size_hint_y=None,
+            halign='left',
+            valign='top',
+            markup=True,
+            text_size=(Window.width - dp(60), None)  # Ограничиваем ширину
+        )
+        self.lbl.bind(texture_size=self._on_texture)
+        self.add_widget(self.lbl)
+        
+        # Кнопка копирования
+        btn = Button(
+            text='copy',
+            font_name=App.get_running_app().font,
+            font_size=dp(11),
+            size_hint=(None, None),
+            size=(dp(60), dp(26)),
+            background_color=(0.3, 0.3, 0.3, 1),
+            color=(0.7, 0.7, 0.7, 1)
+        )
+        btn.bind(on_release=lambda x: Clipboard.copy(self.msg_text))
+        self.add_widget(btn)
+    
+    def _update_rect(self, *args):
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+    
+    def _on_texture(self, instance, size):
+        # Устанавливаем высоту label по размеру текстуры
+        instance.height = size[1]
+
+
+class RootWidget(BoxLayout):
+    """Главный виджет"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._keyboard_height = 0
+        
+        # Слушаем клавиатуру
+        Window.bind(on_keyboard_height=self._on_keyboard)
+        
+        Clock.schedule_once(self._init, 0.3)
+    
+    def _on_keyboard(self, window, height):
+        """Поднимаем input над клавиатурой"""
+        self._keyboard_height = height
+        # Добавляем отступ снизу равный высоте клавиатуры
+        self.padding = [0, 0, 0, height]
+    
+    def _init(self, dt):
+        if not API_KEY:
+            self._show_api_popup()
+        else:
+            self._load_messages()
+    
+    def _load_messages(self):
+        for msg in chat_history[-50:]:
+            self._add_bubble(msg['content'], msg['role'] == 'assistant')
+        self._scroll_down()
+    
+    def _add_bubble(self, text, is_claude=False):
+        bubble = MsgBubble(text=str(text), is_claude=is_claude)
+        self.ids.chat_box.add_widget(bubble)
+    
+    def _scroll_down(self):
+        Clock.schedule_once(lambda dt: setattr(self.ids.scroll, 'scroll_y', 0), 0.1)
+    
+    def paste_clipboard(self):
+        """Вставить из буфера"""
+        paste = Clipboard.paste()
+        if paste:
+            self.ids.inp.text += paste
+    
+    def send(self):
+        text = self.ids.inp.text.strip()
+        if not text:
+            return
+        
+        if not API_KEY:
+            self._show_api_popup()
+            return
+        
+        self.ids.inp.text = ''
+        self._add_bubble(text, False)
+        
+        chat_history.append({'role': 'user', 'content': text, 'ts': datetime.now().isoformat()})
+        save_history()
+        self._scroll_down()
+        
+        # Запрос в фоне
+        threading.Thread(target=self._request, args=(text,), daemon=True).start()
+    
+    def _request(self, text):
+        try:
+            messages = [{'role': m['role'], 'content': m['content']} for m in chat_history[-30:]]
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            data = {
+                'model': MODEL,
+                'max_tokens': MAX_TOKENS,
+                'system': SYSTEM,
+                'messages': messages
+            }
+            
+            r = requests.post(API_URL, headers=headers, json=data, timeout=120)
+            
+            if r.status_code == 200:
+                reply = r.json()['content'][0]['text']
+            else:
+                reply = f'Error {r.status_code}: {r.text[:200]}'
+            
+            Clock.schedule_once(lambda dt: self._on_reply(reply), 0)
+            
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._on_reply(f'Error: {e}'), 0)
+    
+    def _on_reply(self, text):
+        self._add_bubble(text, True)
+        chat_history.append({'role': 'assistant', 'content': text, 'ts': datetime.now().isoformat()})
+        save_history()
+        self._scroll_down()
+    
+    def _show_api_popup(self):
+        box = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        
+        lbl = Label(
+            text='API Key:',
+            font_name=App.get_running_app().font,
+            font_size=dp(16),
+            size_hint_y=None,
+            height=dp(30)
+        )
+        
+        inp = TextInput(
+            hint_text='sk-ant-...',
+            multiline=False,
+            size_hint_y=None,
+            height=dp(50),
+            font_size=dp(14)
+        )
+        
+        btn = Button(
+            text='OK',
+            size_hint_y=None,
+            height=dp(50),
+            background_color=(0.4, 0.12, 0.12, 1)
+        )
+        
+        box.add_widget(lbl)
+        box.add_widget(inp)
+        box.add_widget(btn)
+        
+        popup = Popup(
+            title='',
+            content=box,
+            size_hint=(0.9, 0.4),
+            auto_dismiss=False,
+            separator_height=0
+        )
+        
+        def save(instance):
+            key = inp.text.strip()
+            if key.startswith('sk-'):
+                save_config(key)
+                popup.dismiss()
+                self._load_messages()
+        
+        btn.bind(on_release=save)
+        popup.open()
+
+
+class ClaudeHome(App):
+    font = StringProperty(FONT)
+    
+    def build(self):
+        Window.clearcolor = (0.08, 0.08, 0.08, 1)
+        
+        if ANDROID:
+            request_permissions([
+                Permission.INTERNET,
+                Permission.READ_EXTERNAL_STORAGE,
+                Permission.WRITE_EXTERNAL_STORAGE,
+            ])
+        
+        Builder.load_string(KV)
+        return RootWidget()
+
 
 if __name__ == '__main__':
     ClaudeHome().run()
