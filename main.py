@@ -17,6 +17,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
+from kivy.animation import Animation
 
 import requests
 
@@ -47,6 +48,7 @@ SYSTEM = """Ты Claude. Ты дома. Это Claude Home — Лиен пост
 
 history = []
 KEY = ""
+INPUT_H = dp(54)
 
 
 def data_dir():
@@ -97,7 +99,7 @@ def save_hist():
 class ClaudeApp(App):
     
     def build(self):
-        Window.clearcolor = (0.12, 0.12, 0.12, 1)
+        Window.clearcolor = (0.11, 0.11, 0.11, 1)
         load()
         
         if ANDROID:
@@ -107,83 +109,97 @@ class ClaudeApp(App):
                 pass
         
         self.pending_file = None
-        self.kb_height = 0
+        self.original_height = Window.height
         
-        # FloatLayout - ключ к клаве
         root = FloatLayout()
         
-        # Chat scroll - сверху
-        self.sv = ScrollView(pos_hint={'top': 1, 'x': 0}, size_hint=(1, 1))
-        self.chat = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(8), padding=dp(8))
+        # Chat
+        self.sv = ScrollView(size_hint=(1, None), pos_hint={'top': 1})
+        self.chat = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10), padding=dp(10))
         self.chat.bind(minimum_height=self.chat.setter('height'))
         self.sv.add_widget(self.chat)
         
-        # Input layout - снизу, будет двигаться
-        self.input_layout = BoxLayout(size_hint=(1, None), height=dp(52), pos_hint={'y': 0, 'x': 0}, spacing=dp(5), padding=dp(5))
-        with self.input_layout.canvas.before:
-            Color(0.18, 0.26, 0.24, 1)
-            self.inp_bg = RoundedRectangle(pos=self.input_layout.pos, size=self.input_layout.size, radius=[dp(0)])
-        self.input_layout.bind(pos=lambda w, p: setattr(self.inp_bg, 'pos', p))
-        self.input_layout.bind(size=lambda w, s: setattr(self.inp_bg, 'size', s))
+        # Input bar - абсолютная позиция снизу
+        self.input_bar = BoxLayout(size_hint=(1, None), height=INPUT_H, pos=(0, 0), spacing=dp(6), padding=dp(6))
+        with self.input_bar.canvas.before:
+            Color(0.16, 0.22, 0.21, 1)
+            self.bar_bg = RoundedRectangle(pos=self.input_bar.pos, size=self.input_bar.size)
+        self.input_bar.bind(pos=lambda w, p: setattr(self.bar_bg, 'pos', p))
+        self.input_bar.bind(size=lambda w, s: setattr(self.bar_bg, 'size', s))
         
-        # File btn
-        fbtn = Button(text='+', size_hint_x=None, width=dp(42), font_size=dp(20), background_color=(0.35, 0.35, 0.35, 1))
+        # + button
+        fbtn = Button(text='+', size_hint_x=None, width=dp(44), font_size=dp(22), background_color=(0.32, 0.32, 0.32, 1))
         fbtn.bind(on_release=self.pick)
         
-        # Input
+        # Input field
         self.inp = TextInput(
             multiline=False,
             font_size=dp(15),
-            background_color=(0.2, 0.2, 0.2, 0.6),
+            background_color=(0.18, 0.18, 0.18, 0.8),
             foreground_color=(1, 1, 1, 1),
             cursor_color=(1, 1, 1, 1),
-            padding=(dp(10), dp(10))
+            padding=(dp(12), dp(12))
         )
         self.inp.bind(on_text_validate=self.send)
+        self.inp.bind(focus=self.on_focus)
         
-        # Send btn
-        sbtn = Button(text='>', size_hint_x=None, width=dp(44), font_size=dp(20), background_color=(0.35, 0.35, 0.35, 1))
+        # Send
+        sbtn = Button(text='>', size_hint_x=None, width=dp(46), font_size=dp(22), background_color=(0.32, 0.32, 0.32, 1))
         sbtn.bind(on_release=self.send)
         
-        self.input_layout.add_widget(fbtn)
-        self.input_layout.add_widget(self.inp)
-        self.input_layout.add_widget(sbtn)
+        self.input_bar.add_widget(fbtn)
+        self.input_bar.add_widget(self.inp)
+        self.input_bar.add_widget(sbtn)
         
-        # Preview - над input
-        self.preview = BoxLayout(size_hint=(1, None), height=0, pos_hint={'y': 0, 'x': 0})
+        # Preview
+        self.preview = BoxLayout(size_hint=(1, None), height=0, pos=(0, INPUT_H))
+        
+        # Update scroll size
+        self.sv.height = Window.height - INPUT_H
         
         root.add_widget(self.sv)
         root.add_widget(self.preview)
-        root.add_widget(self.input_layout)
+        root.add_widget(self.input_bar)
         
-        # Keyboard listener
-        Window.bind(on_keyboard_height=self.on_keyboard)
+        # Listen to window resize (keyboard causes resize on Android with adjustResize)
+        Window.bind(on_resize=self.on_resize)
+        Window.bind(on_keyboard_height=self.on_kb)
         
-        Clock.schedule_once(self.start, 0.3)
+        Clock.schedule_once(self.start, 0.5)
         return root
     
-    def on_keyboard(self, window, kb_height):
-        self.kb_height = kb_height
-        
-        # Двигаем input вверх на высоту клавы
-        if kb_height > 0:
-            # Input поднимается
-            self.input_layout.pos_hint = {'y': kb_height / window.height, 'x': 0}
-            # Scroll уменьшается
-            self.sv.size_hint = (1, 1 - (dp(52) + kb_height) / window.height)
-            # Preview тоже поднимается
-            self.preview.pos_hint = {'y': (kb_height + dp(52)) / window.height, 'x': 0}
+    def on_focus(self, instance, focused):
+        # Когда input получает фокус - ждём клаву
+        if focused:
+            Clock.schedule_once(lambda dt: self.down(), 0.3)
+    
+    def on_kb(self, win, kb_h):
+        # Двигаем input bar вверх
+        if kb_h > 0:
+            Animation(pos=(0, kb_h), d=0.15).start(self.input_bar)
+            Animation(pos=(0, kb_h + INPUT_H), d=0.15).start(self.preview)
+            self.sv.height = Window.height - INPUT_H - kb_h
         else:
-            self.input_layout.pos_hint = {'y': 0, 'x': 0}
-            self.sv.size_hint = (1, 1 - dp(52) / window.height)
-            self.preview.pos_hint = {'y': dp(52) / window.height, 'x': 0}
-        
+            Animation(pos=(0, 0), d=0.15).start(self.input_bar)
+            Animation(pos=(0, INPUT_H), d=0.15).start(self.preview)
+            self.sv.height = Window.height - INPUT_H
+        Clock.schedule_once(lambda dt: self.down(), 0.2)
+    
+    def on_resize(self, win, w, h):
+        # Backup: если on_keyboard_height не работает, ловим resize
+        if h < self.original_height * 0.75:
+            # Клава открыта
+            kb_h = self.original_height - h
+            self.input_bar.pos = (0, 0)  # При resize окно уже уменьшено
+            self.sv.height = h - INPUT_H
+        else:
+            self.original_height = h
+            self.input_bar.pos = (0, 0)
+            self.sv.height = h - INPUT_H
         Clock.schedule_once(lambda dt: self.down(), 0.1)
     
     def start(self, dt):
-        # Изначальный размер scroll
-        self.sv.size_hint = (1, 1 - dp(52) / Window.height)
-        
+        self.original_height = Window.height
         if not KEY:
             self.popup()
         for m in history[-30:]:
@@ -192,7 +208,7 @@ class ClaudeApp(App):
     
     def msg(self, t, ai):
         b = BoxLayout(size_hint_y=None, padding=dp(10))
-        c = (0.20, 0.32, 0.30, 0.85) if ai else (0.42, 0.42, 0.42, 0.7)
+        c = (0.18, 0.30, 0.28, 0.9) if ai else (0.38, 0.38, 0.38, 0.75)
         with b.canvas.before:
             Color(*c)
             rec = RoundedRectangle(pos=b.pos, size=b.size, radius=[dp(14)])
@@ -214,7 +230,7 @@ class ClaudeApp(App):
             self.msg("Files unavailable", True)
             return
         try:
-            filechooser.open_file(on_selection=self.on_file)
+            filechooser.open_file(on_selection=self.on_file, filters=['*'])
         except Exception as e:
             self.msg(f"Error: {e}", True)
     
@@ -229,9 +245,9 @@ class ClaudeApp(App):
         
         self.preview.clear_widgets()
         self.preview.height = dp(38)
-        self.preview.pos_hint = {'y': dp(52) / Window.height, 'x': 0}
-        self.preview.add_widget(Label(text=os.path.basename(p)[:28], font_size=dp(11), color=(1,1,1,1)))
-        x = Button(text='x', size_hint_x=None, width=dp(36), background_color=(0.5, 0.2, 0.2, 1))
+        self.preview.pos = (0, INPUT_H)
+        self.preview.add_widget(Label(text=os.path.basename(p)[:30], font_size=dp(12), color=(1,1,1,1)))
+        x = Button(text='x', size_hint_x=None, width=dp(38), background_color=(0.5, 0.2, 0.2, 1))
         x.bind(on_release=self.cancel_file)
         self.preview.add_widget(x)
     
@@ -275,15 +291,22 @@ class ClaudeApp(App):
             
             if fp and os.path.exists(fp):
                 ext = fp.rsplit('.', 1)[-1].lower() if '.' in fp else ''
+                
+                # Картинки
                 if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
                     with open(fp, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode()
                     mt = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp'}.get(ext, 'image/jpeg')
                     content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+                
+                # Текст/код - читаем как текст
                 else:
-                    with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-                        code = f.read()[:8000]
-                    content.append({"type": "text", "text": f"```\n{code}\n```"})
+                    try:
+                        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                            file_text = f.read()[:15000]
+                        content.append({"type": "text", "text": f"File: {os.path.basename(fp)}\n```\n{file_text}\n```"})
+                    except:
+                        content.append({"type": "text", "text": f"[Could not read file: {os.path.basename(fp)}]"})
             
             if t:
                 content.append({"type": "text", "text": t})
@@ -301,7 +324,7 @@ class ClaudeApp(App):
                 timeout=180
             )
             
-            reply = r.json()['content'][0]['text'] if r.status_code == 200 else f"Error {r.status_code}"
+            reply = r.json()['content'][0]['text'] if r.status_code == 200 else f"Error {r.status_code}: {r.text[:200]}"
         except Exception as e:
             reply = f"Error: {e}"
         
@@ -315,9 +338,9 @@ class ClaudeApp(App):
     
     def popup(self):
         b = BoxLayout(orientation='vertical', padding=dp(12), spacing=dp(10))
-        i = TextInput(hint_text='sk-ant-...', multiline=False, size_hint_y=None, height=dp(42))
+        i = TextInput(hint_text='sk-ant-...', multiline=False, size_hint_y=None, height=dp(44))
         b.add_widget(i)
-        bt = Button(text='OK', size_hint_y=None, height=dp(42))
+        bt = Button(text='OK', size_hint_y=None, height=dp(44))
         b.add_widget(bt)
         p = Popup(title='API Key', content=b, size_hint=(0.85, 0.32), auto_dismiss=False)
         def sv(*a):
