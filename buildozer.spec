@@ -16,6 +16,7 @@ android.arch = arm64-v8a
 android.allow_backup = True
 icon.filename = icon.png
 android.enable_androidx = True
+android.add_activity_xml = android:windowSoftInputMode="adjustResize"
 
 [buildozer]
 log_level = 2
