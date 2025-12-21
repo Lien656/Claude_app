@@ -34,8 +34,10 @@ except:
 import requests
 
 # === ШРИФТ — НЕ РЕГИСТРИРУЕМ, ИСПОЛЬЗУЕМ СИСТЕМНЫЙ ===
-# Kivy на Android сам подтянет системный шрифт с кириллицей
 FONT = 'Roboto'
+
+# === КЛАВИАТУРА — режим resize ===
+Window.softinput_mode = 'resize'
 
 # === ANDROID ===
 ANDROID = False
@@ -288,15 +290,7 @@ class RootWidget(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.pending_image = None
-        
-        # КЛАВИАТУРА — слушаем высоту
-        Window.bind(on_keyboard_height=self._on_kb)
-        
         Clock.schedule_once(self._init, 0.3)
-    
-    def _on_kb(self, win, height):
-        """Поднимаем всё над клавиатурой"""
-        self.padding = [0, 0, 0, height]
     
     def _init(self, dt):
         if not API_KEY:
