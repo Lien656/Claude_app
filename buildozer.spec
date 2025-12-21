@@ -4,12 +4,11 @@ package.name = claude_home
 package.domain = org.alina
 source.dir = .
 source.include_exts = py,png,jpg,kv,json,ttf
-version = 2.0
-# ИСПРАВЛЕННЫЕ ТРЕБОВАНИЯ: ДОБАВЛЕН OPENSLL
-requirements = python3,kivy==2.3.0,requests,urllib3,charset-normalizer,idna,certifi,openssl,plyer,pillow,pyjnius
+version = 3.0
+requirements = python3,kivy==2.2.1,requests,certifi,pillow
 orientation = portrait
 fullscreen = 0
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE,CAMERA,RECEIVE_BOOT_COMPLETED,FOREGROUND_SERVICE
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 android.api = 33
 android.minapi = 28
 android.ndk_api = 28
