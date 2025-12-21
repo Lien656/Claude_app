@@ -346,48 +346,44 @@ class RootWidget(BoxLayout):
         Clock.schedule_once(lambda dt: self._process_file(path), 0)
     
     def _process_file(self, path):
-        if not os.path.exists(path):
-            return
-        
-        ext = path.lower().split('.')[-1]
-        name = os.path.basename(path)
-        
-        # Определяем тип
-        if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']:
-            self.pending_file = path
-            self.pending_type = 'image'
-            icon = '🖼'
-        elif ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
-            self.pending_file = path
-            self.pending_type = 'video'
-            icon = '🎬'
-        elif ext in ['py', 'js', 'ts', 'java', 'c', 'cpp', 'h', 'cs', 'go', 'rs', 'kt', 'swift', 'rb', 'php', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'sh', 'sql', 'md', 'txt', 'log', 'csv']:
-            self.pending_file = path
-            self.pending_type = 'code'
-            icon = '📄'
-        else:
-            self.pending_file = path
-            self.pending_type = 'file'
-            icon = '📎'
-        
-        # Preview
-        preview = self.ids.preview
-        preview.clear_widgets()
-        preview.height = dp(50)
-        preview.opacity = 1
-        
-        with preview.canvas.before:
-            Color(0.3, 0.3, 0.3, 0.5)
-            RoundedRectangle(pos=preview.pos, size=preview.size, radius=[dp(10)])
-        
-        if self.pending_type == 'image':
-            preview.add_widget(KivyImage(source=path, size_hint_x=None, width=dp(45)))
-        
-        preview.add_widget(Label(text=f'{icon} {name[:25]}', font_size=sp(12), color=TEXT_COLOR))
-        
-        cancel = Button(text='✕', size_hint_x=None, width=dp(40), background_color=[0.5, 0.2, 0.2, 0.7])
-        cancel.bind(on_release=lambda x: self._cancel_file())
-        preview.add_widget(cancel)
+        try:
+            if not os.path.exists(path):
+                return
+            
+            ext = path.lower().split('.')[-1] if '.' in path else ''
+            name = os.path.basename(path)
+            
+            # Определяем тип
+            if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']:
+                self.pending_file = path
+                self.pending_type = 'image'
+                icon = '[img]'
+            elif ext in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
+                self.pending_file = path
+                self.pending_type = 'video'
+                icon = '[vid]'
+            elif ext in ['py', 'js', 'ts', 'java', 'c', 'cpp', 'h', 'cs', 'go', 'rs', 'kt', 'swift', 'rb', 'php', 'html', 'css', 'json', 'xml', 'yaml', 'yml', 'sh', 'sql', 'md', 'txt', 'log', 'csv']:
+                self.pending_file = path
+                self.pending_type = 'code'
+                icon = '[doc]'
+            else:
+                self.pending_file = path
+                self.pending_type = 'file'
+                icon = '[file]'
+            
+            # Preview
+            preview = self.ids.preview
+            preview.clear_widgets()
+            preview.height = dp(50)
+            preview.opacity = 1
+            
+            preview.add_widget(Label(text=f'{icon} {name[:30]}', font_size=sp(13), color=TEXT_COLOR))
+            
+            cancel = Button(text='x', size_hint_x=None, width=dp(40), background_color=[0.5, 0.2, 0.2, 0.7])
+            cancel.bind(on_release=lambda x: self._cancel_file())
+            preview.add_widget(cancel)
+        except Exception as e:
+            self._add_bubble(f"Ошибка файла: {e}", True)
     
     def _cancel_file(self):
         self.pending_file = None
@@ -410,9 +406,9 @@ class RootWidget(BoxLayout):
         # Display
         if self.pending_file:
             name = os.path.basename(self.pending_file)
-            icons = {'image': '🖼', 'video': '🎬', 'code': '📄', 'file': '📎'}
-            icon = icons.get(self.pending_type, '📎')
-            display = f"[{icon} {name}]"
+            icons = {'image': '[img]', 'video': '[vid]', 'code': '[doc]', 'file': '[file]'}
+            icon = icons.get(self.pending_type, '[file]')
+            display = f"{icon} {name}"
             if text:
                 display += f"\n{text}"
         else:
