@@ -1,14 +1,14 @@
 [app]
 title = Claude Home
 package.name = claude_home
-package.domain = org.alina
+package.domain = org.lien
 source.dir = .
-source.include_exts = py,png,jpg,kv,json,ttf
-version = 3.0
-requirements = python3,kivy==2.2.1,requests,certifi,pillow
+source.include_exts = py,png,jpg,json
+version = 3.1
+requirements = python3,kivy==2.2.1,requests,certifi,pillow,plyer,pyjnius
 orientation = portrait
 fullscreen = 0
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,READ_MEDIA_IMAGES
 android.api = 33
 android.minapi = 28
 android.ndk_api = 28
