@@ -4,7 +4,7 @@ package.name = claude_home
 package.domain = org.lien
 source.dir = .
 source.include_exts = py,png,jpg,json
-version = 3.1
+version = 4.0
 requirements = python3,kivy==2.2.1,requests,certifi,pillow,plyer,pyjnius
 orientation = portrait
 fullscreen = 0
