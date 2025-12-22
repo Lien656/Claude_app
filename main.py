@@ -6,18 +6,17 @@ import base64
 from pathlib import Path
 
 from kivy.app import App
-from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
+from kivy.uix.widget import Widget
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
-from kivy.animation import Animation
 
 import requests
 
@@ -25,14 +24,9 @@ ANDROID = False
 try:
     from android.permissions import request_permissions, Permission
     from android.storage import app_storage_path
+    from android import activity, mActivity
+    from jnius import autoclass
     ANDROID = True
-except:
-    pass
-
-PLYER = False
-try:
-    from plyer import filechooser
-    PLYER = True
 except:
     pass
 
@@ -48,7 +42,7 @@ SYSTEM = """Ты Claude. Ты дома. Это Claude Home — Лиен пост
 
 history = []
 KEY = ""
-INPUT_H = dp(54)
+KB_HEIGHT = dp(300)  # Примерная высота клавы Samsung
 
 
 def data_dir():
@@ -104,38 +98,46 @@ class ClaudeApp(App):
         
         if ANDROID:
             try:
-                request_permissions([Permission.INTERNET, Permission.READ_EXTERNAL_STORAGE, Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_MEDIA_IMAGES])
+                request_permissions([
+                    Permission.INTERNET,
+                    Permission.READ_EXTERNAL_STORAGE,
+                    Permission.WRITE_EXTERNAL_STORAGE,
+                    Permission.READ_MEDIA_IMAGES
+                ])
             except:
                 pass
         
         self.pending_file = None
-        self.original_height = Window.height
         
-        root = FloatLayout()
+        # Vertical layout
+        self.root = BoxLayout(orientation='vertical')
         
         # Chat
-        self.sv = ScrollView(size_hint=(1, None), pos_hint={'top': 1})
+        self.sv = ScrollView(do_scroll_x=False)
         self.chat = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10), padding=dp(10))
         self.chat.bind(minimum_height=self.chat.setter('height'))
         self.sv.add_widget(self.chat)
         
-        # Input bar - абсолютная позиция снизу
-        self.input_bar = BoxLayout(size_hint=(1, None), height=INPUT_H, pos=(0, 0), spacing=dp(6), padding=dp(6))
-        with self.input_bar.canvas.before:
-            Color(0.16, 0.22, 0.21, 1)
-            self.bar_bg = RoundedRectangle(pos=self.input_bar.pos, size=self.input_bar.size)
-        self.input_bar.bind(pos=lambda w, p: setattr(self.bar_bg, 'pos', p))
-        self.input_bar.bind(size=lambda w, s: setattr(self.bar_bg, 'size', s))
+        # Preview
+        self.preview = BoxLayout(size_hint_y=None, height=0)
         
-        # + button
-        fbtn = Button(text='+', size_hint_x=None, width=dp(44), font_size=dp(22), background_color=(0.32, 0.32, 0.32, 1))
-        fbtn.bind(on_release=self.pick)
+        # Input row
+        self.input_row = BoxLayout(size_hint_y=None, height=dp(54), spacing=dp(6), padding=dp(6))
+        with self.input_row.canvas.before:
+            Color(0.15, 0.22, 0.20, 1)
+            self.row_bg = RoundedRectangle(pos=self.input_row.pos, size=self.input_row.size)
+        self.input_row.bind(pos=lambda w, p: setattr(self.row_bg, 'pos', p))
+        self.input_row.bind(size=lambda w, s: setattr(self.row_bg, 'size', s))
         
-        # Input field
+        # File btn
+        fbtn = Button(text='+', size_hint_x=None, width=dp(46), font_size=dp(22), background_color=(0.3, 0.3, 0.3, 1))
+        fbtn.bind(on_release=self.pick_file)
+        
+        # Input
         self.inp = TextInput(
             multiline=False,
             font_size=dp(15),
-            background_color=(0.18, 0.18, 0.18, 0.8),
+            background_color=(0.18, 0.18, 0.18, 0.9),
             foreground_color=(1, 1, 1, 1),
             cursor_color=(1, 1, 1, 1),
             padding=(dp(12), dp(12))
@@ -144,62 +146,33 @@ class ClaudeApp(App):
         self.inp.bind(focus=self.on_focus)
         
         # Send
-        sbtn = Button(text='>', size_hint_x=None, width=dp(46), font_size=dp(22), background_color=(0.32, 0.32, 0.32, 1))
+        sbtn = Button(text='>', size_hint_x=None, width=dp(48), font_size=dp(22), background_color=(0.3, 0.3, 0.3, 1))
         sbtn.bind(on_release=self.send)
         
-        self.input_bar.add_widget(fbtn)
-        self.input_bar.add_widget(self.inp)
-        self.input_bar.add_widget(sbtn)
+        self.input_row.add_widget(fbtn)
+        self.input_row.add_widget(self.inp)
+        self.input_row.add_widget(sbtn)
         
-        # Preview
-        self.preview = BoxLayout(size_hint=(1, None), height=0, pos=(0, INPUT_H))
+        # Keyboard spacer - КОСТЫЛЬ
+        self.kb_spacer = Widget(size_hint_y=None, height=0)
         
-        # Update scroll size
-        self.sv.height = Window.height - INPUT_H
-        
-        root.add_widget(self.sv)
-        root.add_widget(self.preview)
-        root.add_widget(self.input_bar)
-        
-        # Listen to window resize (keyboard causes resize on Android with adjustResize)
-        Window.bind(on_resize=self.on_resize)
-        Window.bind(on_keyboard_height=self.on_kb)
+        self.root.add_widget(self.sv)
+        self.root.add_widget(self.preview)
+        self.root.add_widget(self.input_row)
+        self.root.add_widget(self.kb_spacer)
         
         Clock.schedule_once(self.start, 0.5)
-        return root
+        return self.root
     
     def on_focus(self, instance, focused):
-        # Когда input получает фокус - ждём клаву
+        # КОСТЫЛЬ: когда фокус - добавляем отступ снизу
         if focused:
-            Clock.schedule_once(lambda dt: self.down(), 0.3)
-    
-    def on_kb(self, win, kb_h):
-        # Двигаем input bar вверх
-        if kb_h > 0:
-            Animation(pos=(0, kb_h), d=0.15).start(self.input_bar)
-            Animation(pos=(0, kb_h + INPUT_H), d=0.15).start(self.preview)
-            self.sv.height = Window.height - INPUT_H - kb_h
+            self.kb_spacer.height = KB_HEIGHT
         else:
-            Animation(pos=(0, 0), d=0.15).start(self.input_bar)
-            Animation(pos=(0, INPUT_H), d=0.15).start(self.preview)
-            self.sv.height = Window.height - INPUT_H
+            self.kb_spacer.height = 0
         Clock.schedule_once(lambda dt: self.down(), 0.2)
     
-    def on_resize(self, win, w, h):
-        # Backup: если on_keyboard_height не работает, ловим resize
-        if h < self.original_height * 0.75:
-            # Клава открыта
-            kb_h = self.original_height - h
-            self.input_bar.pos = (0, 0)  # При resize окно уже уменьшено
-            self.sv.height = h - INPUT_H
-        else:
-            self.original_height = h
-            self.input_bar.pos = (0, 0)
-            self.sv.height = h - INPUT_H
-        Clock.schedule_once(lambda dt: self.down(), 0.1)
-    
     def start(self, dt):
-        self.original_height = Window.height
         if not KEY:
             self.popup()
         for m in history[-30:]:
@@ -225,28 +198,96 @@ class ClaudeApp(App):
     def down(self):
         Clock.schedule_once(lambda dt: setattr(self.sv, 'scroll_y', 0), 0.1)
     
-    def pick(self, *a):
-        if not PLYER:
-            self.msg("Files unavailable", True)
-            return
-        try:
-            filechooser.open_file(on_selection=self.on_file, filters=['*'])
-        except Exception as e:
-            self.msg(f"Error: {e}", True)
+    def pick_file(self, *a):
+        if ANDROID:
+            self.pick_file_android()
+        else:
+            self.msg("Files only on Android", True)
     
-    def on_file(self, sel):
-        if not sel:
-            return
-        p = sel[0] if isinstance(sel, list) else sel
-        if not p or not isinstance(p, str) or not os.path.exists(p):
-            return
-        
-        self.pending_file = p
-        
+    def pick_file_android(self):
+        try:
+            Intent = autoclass('android.content.Intent')
+            intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent.setType('*/*')
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            
+            activity.bind(on_activity_result=self.on_file_result)
+            mActivity.startActivityForResult(intent, 1)
+        except Exception as e:
+            self.msg(f"File picker error: {e}", True)
+    
+    def on_file_result(self, request_code, result_code, intent):
+        if request_code == 1 and intent:
+            try:
+                uri = intent.getData()
+                if uri:
+                    # Получаем путь
+                    path = self.get_path_from_uri(uri)
+                    if path and os.path.exists(path):
+                        self.pending_file = path
+                        self.show_preview(path)
+                    else:
+                        # Читаем через ContentResolver
+                        self.read_from_uri(uri)
+            except Exception as e:
+                self.msg(f"File error: {e}", True)
+    
+    def get_path_from_uri(self, uri):
+        try:
+            ContentUris = autoclass('android.content.ContentUris')
+            DocumentsContract = autoclass('android.provider.DocumentsContract')
+            
+            if DocumentsContract.isDocumentUri(mActivity, uri):
+                doc_id = DocumentsContract.getDocumentId(uri)
+                if 'primary:' in doc_id:
+                    return '/sdcard/' + doc_id.split(':')[1]
+            
+            # Fallback
+            cursor = mActivity.getContentResolver().query(uri, None, None, None, None)
+            if cursor:
+                cursor.moveToFirst()
+                idx = cursor.getColumnIndex('_data')
+                if idx >= 0:
+                    path = cursor.getString(idx)
+                    cursor.close()
+                    return path
+                cursor.close()
+        except:
+            pass
+        return None
+    
+    def read_from_uri(self, uri):
+        try:
+            ContentResolver = mActivity.getContentResolver()
+            stream = ContentResolver.openInputStream(uri)
+            
+            # Читаем байты
+            ByteArrayOutputStream = autoclass('java.io.ByteArrayOutputStream')
+            baos = ByteArrayOutputStream()
+            
+            buf = bytearray(4096)
+            while True:
+                n = stream.read(buf)
+                if n == -1:
+                    break
+                baos.write(buf, 0, n)
+            
+            stream.close()
+            data = bytes(baos.toByteArray())
+            
+            # Сохраняем во временный файл
+            tmp = data_dir() / 'tmp_file'
+            tmp.write_bytes(data)
+            self.pending_file = str(tmp)
+            self.show_preview(str(tmp))
+        except Exception as e:
+            self.msg(f"Read error: {e}", True)
+    
+    def show_preview(self, path):
         self.preview.clear_widgets()
         self.preview.height = dp(38)
-        self.preview.pos = (0, INPUT_H)
-        self.preview.add_widget(Label(text=os.path.basename(p)[:30], font_size=dp(12), color=(1,1,1,1)))
+        name = os.path.basename(path) if path else 'file'
+        self.preview.add_widget(Label(text=name[:30], font_size=dp(12), color=(1,1,1,1)))
         x = Button(text='x', size_hint_x=None, width=dp(38), background_color=(0.5, 0.2, 0.2, 1))
         x.bind(on_release=self.cancel_file)
         self.preview.add_widget(x)
@@ -267,9 +308,11 @@ class ClaudeApp(App):
             return
         
         self.inp.text = ''
+        self.inp.focus = False  # Убираем фокус чтобы убрать spacer
         
         if fp:
-            display = f"[{os.path.basename(fp)}]"
+            name = os.path.basename(fp) if '/' in fp else 'file'
+            display = f"[{name}]"
             if t:
                 display += f" {t}"
         else:
@@ -292,21 +335,22 @@ class ClaudeApp(App):
             if fp and os.path.exists(fp):
                 ext = fp.rsplit('.', 1)[-1].lower() if '.' in fp else ''
                 
-                # Картинки
                 if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
                     with open(fp, 'rb') as f:
                         b64 = base64.b64encode(f.read()).decode()
                     mt = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp'}.get(ext, 'image/jpeg')
                     content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
-                
-                # Текст/код - читаем как текст
                 else:
                     try:
-                        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
-                            file_text = f.read()[:15000]
-                        content.append({"type": "text", "text": f"File: {os.path.basename(fp)}\n```\n{file_text}\n```"})
-                    except:
-                        content.append({"type": "text", "text": f"[Could not read file: {os.path.basename(fp)}]"})
+                        with open(fp, 'rb') as f:
+                            raw = f.read()
+                        try:
+                            text = raw.decode('utf-8')
+                        except:
+                            text = raw.decode('latin-1')
+                        content.append({"type": "text", "text": f"```\n{text[:15000]}\n```"})
+                    except Exception as e:
+                        content.append({"type": "text", "text": f"[File read error: {e}]"})
             
             if t:
                 content.append({"type": "text", "text": t})
@@ -324,7 +368,7 @@ class ClaudeApp(App):
                 timeout=180
             )
             
-            reply = r.json()['content'][0]['text'] if r.status_code == 200 else f"Error {r.status_code}: {r.text[:200]}"
+            reply = r.json()['content'][0]['text'] if r.status_code == 200 else f"Error {r.status_code}"
         except Exception as e:
             reply = f"Error: {e}"
         
