@@ -15,10 +15,132 @@ from kivy.uix.popup import Popup
 from kivy.uix.widget import Widget
 from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.core.clipboard import Clipboard
 from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 
 import requests
+
+# Emoji to text mapping
+EMOJI_MAP = {
+    '😀': ':)', '😃': ':D', '😄': ':D', '😁': ':D', '😅': ':D', '😂': 'xD',
+    '🤣': 'xD', '😊': ':)', '😇': ':)', '🙂': ':)', '😉': ';)', '😌': ':)',
+    '😍': '<3', '🥰': '<3', '😘': ':*', '😗': ':*', '😙': ':*', '😚': ':*',
+    '😋': ':P', '😛': ':P', '😜': ';P', '🤪': ':P', '😝': ':P', '🤑': '$)',
+    '🤗': ':)', '🤭': ':)', '🤫': 'shh', '🤔': '?)', '🤐': ':|', '🤨': ':/)',
+    '😐': ':|', '😑': '-_-', '😶': ':|', '😏': ';)', '😒': ':|', '🙄': 'e_e',
+    '😬': ':S', '🤥': ':|', '😌': ':)', '😔': ':(', '😪': ':/', '🤤': ':P~',
+    '😴': 'zzz', '😷': ':mask:', '🤒': ':sick:', '🤕': ':hurt:', '🤢': ':S',
+    '🤮': ':S', '🤧': ':achoo:', '🥵': ':hot:', '🥶': ':cold:', '🥴': ':dizzy:',
+    '😵': 'x_x', '🤯': ':mindblown:', '🤠': ':cowboy:', '🥳': ':party:',
+    '😎': 'B)', '🤓': '8)', '🧐': ':monocle:', '😕': ':/', '😟': ':(',
+    '🙁': ':(', '☹️': ':(', '😮': ':O', '😯': ':O', '😲': ':O', '😳': ':$',
+    '🥺': ':(', '😦': ':(', '😧': ':O', '😨': ':O', '😰': ':(', '😥': ':(',
+    '😢': ':\'(', '😭': ':\'(', '😱': ':O', '😖': '>_<', '😣': '>_<',
+    '😞': ':(', '😓': ':(', '😩': ':(', '😫': ':(', '🥱': ':yawn:',
+    '😤': '>:(', '😡': '>:(', '😠': '>:(', '🤬': '>:(', '😈': '>:)',
+    '👿': '>:(', '💀': ':skull:', '☠️': ':skull:', '💩': ':poop:',
+    '🤡': ':clown:', '👹': ':ogre:', '👺': ':goblin:', '👻': ':ghost:',
+    '👽': ':alien:', '👾': ':invader:', '🤖': ':robot:', '😺': ':cat:',
+    '😸': ':D', '😹': 'xD', '😻': '<3', '😼': ';)', '😽': ':*',
+    '🙀': ':O', '😿': ':\'(', '😾': '>:(', '💋': ':kiss:', '💘': '<3',
+    '💝': '<3', '💖': '<3', '💗': '<3', '💓': '<3', '💞': '<3', '💕': '<3',
+    '💟': '<3', '❣️': '<3', '💔': '</3', '❤️': '<3', '🧡': '<3', '💛': '<3',
+    '💚': '<3', '💙': '<3', '💜': '<3', '🖤': '<3', '🤍': '<3', '🤎': '<3',
+    '💯': '100', '💢': ':angry:', '💥': ':boom:', '💫': ':dizzy:',
+    '💦': ':sweat:', '💨': ':dash:', '🕳️': ':hole:', '💣': ':bomb:',
+    '💬': ':speech:', '👁️‍🗨️': ':eye:', '🗨️': ':speech:', '🗯️': ':speech:',
+    '💭': ':thought:', '💤': 'zzz', '👋': ':wave:', '🤚': ':hand:',
+    '🖐️': ':hand:', '✋': ':hand:', '🖖': ':vulcan:', '👌': ':ok:',
+    '🤌': ':pinch:', '🤏': ':small:', '✌️': ':v:', '🤞': ':crossed:',
+    '🤟': ':ily:', '🤘': ':rock:', '🤙': ':call:', '👈': '<-', '👉': '->',
+    '👆': '^', '🖕': ':middle:', '👇': 'v', '☝️': '^', '👍': ':+1:',
+    '👎': ':-1:', '✊': ':fist:', '👊': ':punch:', '🤛': ':punch:',
+    '🤜': ':punch:', '👏': ':clap:', '🙌': ':raise:', '👐': ':open:',
+    '🤲': ':palms:', '🤝': ':handshake:', '🙏': ':pray:', '✍️': ':write:',
+    '💅': ':nails:', '🤳': ':selfie:', '💪': ':muscle:', '🦾': ':mech:',
+    '🦿': ':leg:', '🦵': ':leg:', '🦶': ':foot:', '👂': ':ear:',
+    '🦻': ':ear:', '👃': ':nose:', '🧠': ':brain:', '🫀': ':heart:',
+    '🫁': ':lungs:', '🦷': ':tooth:', '🦴': ':bone:', '👀': ':eyes:',
+    '👁️': ':eye:', '👅': ':tongue:', '👄': ':lips:', '🔥': ':fire:',
+    '⭐': '*', '🌟': '*', '✨': '*', '💫': '*', '🎉': ':party:',
+    '🎊': ':party:', '🎁': ':gift:', '🏆': ':trophy:', '🥇': ':1st:',
+    '🥈': ':2nd:', '🥉': ':3rd:', '⚡': ':zap:', '💡': ':idea:',
+    '👑': ':crown:', '💎': ':gem:', '🔮': ':crystal:', '🎵': ':music:',
+    '🎶': ':music:', '🎤': ':mic:', '🎧': ':headphones:', '🎸': ':guitar:',
+    '🎹': ':piano:', '🎺': ':trumpet:', '🎻': ':violin:', '🥁': ':drum:',
+    '📱': ':phone:', '💻': ':laptop:', '🖥️': ':pc:', '🖨️': ':printer:',
+    '⌨️': ':keyboard:', '🖱️': ':mouse:', '💾': ':disk:', '💿': ':cd:',
+    '📷': ':camera:', '🎥': ':video:', '📺': ':tv:', '📻': ':radio:',
+    '⏰': ':alarm:', '⌚': ':watch:', '📅': ':calendar:', '📝': ':memo:',
+    '✏️': ':pencil:', '📌': ':pin:', '📎': ':clip:', '🔒': ':lock:',
+    '🔓': ':unlock:', '🔑': ':key:', '🔨': ':hammer:', '🔧': ':wrench:',
+    '⚙️': ':gear:', '🧲': ':magnet:', '💊': ':pill:', '🩹': ':bandage:',
+    '🚀': ':rocket:', '✈️': ':plane:', '🚗': ':car:', '🚕': ':taxi:',
+    '🚌': ':bus:', '🚂': ':train:', '🚢': ':ship:', '⛵': ':boat:',
+    '🏠': ':house:', '🏢': ':building:', '🏰': ':castle:', '⛪': ':church:',
+    '🗼': ':tower:', '🗽': ':liberty:', '⛰️': ':mountain:', '🌋': ':volcano:',
+    '🏖️': ':beach:', '🌊': ':wave:', '☀️': ':sun:', '🌙': ':moon:',
+    '⭐': ':star:', '☁️': ':cloud:', '⛈️': ':storm:', '🌈': ':rainbow:',
+    '☔': ':umbrella:', '❄️': ':snow:', '☃️': ':snowman:', '🌸': ':blossom:',
+    '🌹': ':rose:', '🌺': ':flower:', '🌻': ':sunflower:', '🌼': ':flower:',
+    '🌷': ':tulip:', '🌱': ':seedling:', '🌲': ':tree:', '🌳': ':tree:',
+    '🌴': ':palm:', '🌵': ':cactus:', '🍀': ':clover:', '🍁': ':leaf:',
+    '🍂': ':leaves:', '🍃': ':leaf:', '🍎': ':apple:', '🍊': ':orange:',
+    '🍋': ':lemon:', '🍌': ':banana:', '🍉': ':watermelon:', '🍇': ':grapes:',
+    '🍓': ':strawberry:', '🍒': ':cherry:', '🍑': ':peach:', '🥭': ':mango:',
+    '🍍': ':pineapple:', '🥥': ':coconut:', '🥝': ':kiwi:', '🍅': ':tomato:',
+    '🥑': ':avocado:', '🥦': ':broccoli:', '🥕': ':carrot:', '🌽': ':corn:',
+    '🌶️': ':pepper:', '🥒': ':cucumber:', '🥬': ':lettuce:', '🍄': ':mushroom:',
+    '🥜': ':peanut:', '🌰': ':chestnut:', '🍞': ':bread:', '🥐': ':croissant:',
+    '🥖': ':baguette:', '🥨': ':pretzel:', '🧀': ':cheese:', '🥚': ':egg:',
+    '🍳': ':cooking:', '🥓': ':bacon:', '🥩': ':steak:', '🍗': ':chicken:',
+    '🍖': ':meat:', '🌭': ':hotdog:', '🍔': ':burger:', '🍟': ':fries:',
+    '🍕': ':pizza:', '🥪': ':sandwich:', '🌮': ':taco:', '🌯': ':burrito:',
+    '🥗': ':salad:', '🍝': ':pasta:', '🍜': ':ramen:', '🍲': ':soup:',
+    '🍛': ':curry:', '🍣': ':sushi:', '🍱': ':bento:', '🥟': ':dumpling:',
+    '🍤': ':shrimp:', '🍙': ':rice:', '🍚': ':rice:', '🍘': ':cracker:',
+    '🍥': ':fishcake:', '🥮': ':mooncake:', '🍢': ':oden:', '🍡': ':dango:',
+    '🍧': ':ice:', '🍨': ':icecream:', '🍦': ':softice:', '🥧': ':pie:',
+    '🧁': ':cupcake:', '🍰': ':cake:', '🎂': ':birthday:', '🍮': ':custard:',
+    '🍭': ':lollipop:', '🍬': ':candy:', '🍫': ':chocolate:', '🍿': ':popcorn:',
+    '🍩': ':donut:', '🍪': ':cookie:', '🌰': ':chestnut:', '🥛': ':milk:',
+    '🍼': ':bottle:', '☕': ':coffee:', '🍵': ':tea:', '🧃': ':juice:',
+    '🥤': ':cup:', '🍶': ':sake:', '🍺': ':beer:', '🍻': ':beers:',
+    '🥂': ':cheers:', '🍷': ':wine:', '🥃': ':whiskey:', '🍸': ':cocktail:',
+    '🍹': ':tropical:', '🧉': ':mate:', '🧊': ':ice:', '🐶': ':dog:',
+    '🐱': ':cat:', '🐭': ':mouse:', '🐹': ':hamster:', '🐰': ':rabbit:',
+    '🦊': ':fox:', '🐻': ':bear:', '🐼': ':panda:', '🐨': ':koala:',
+    '🐯': ':tiger:', '🦁': ':lion:', '🐮': ':cow:', '🐷': ':pig:',
+    '🐸': ':frog:', '🐵': ':monkey:', '🙈': ':see_no:', '🙉': ':hear_no:',
+    '🙊': ':speak_no:', '🐔': ':chicken:', '🐧': ':penguin:', '🐦': ':bird:',
+    '🐤': ':chick:', '🦆': ':duck:', '🦅': ':eagle:', '🦉': ':owl:',
+    '🦇': ':bat:', '🐺': ':wolf:', '🐗': ':boar:', '🐴': ':horse:',
+    '🦄': ':unicorn:', '🐝': ':bee:', '🐛': ':bug:', '🦋': ':butterfly:',
+    '🐌': ':snail:', '🐞': ':ladybug:', '🐜': ':ant:', '🦟': ':mosquito:',
+    '🦗': ':cricket:', '🕷️': ':spider:', '🦂': ':scorpion:', '🐢': ':turtle:',
+    '🐍': ':snake:', '🦎': ':lizard:', '🦖': ':dino:', '🦕': ':sauropod:',
+    '🐙': ':octopus:', '🦑': ':squid:', '🦐': ':shrimp:', '🦞': ':lobster:',
+    '🦀': ':crab:', '🐡': ':blowfish:', '🐠': ':fish:', '🐟': ':fish:',
+    '🐬': ':dolphin:', '🐳': ':whale:', '🐋': ':whale:', '🦈': ':shark:',
+    '🐊': ':croc:', '🐅': ':tiger:', '🐆': ':leopard:', '🦓': ':zebra:',
+    '🦍': ':gorilla:', '🦧': ':orangutan:', '🐘': ':elephant:', '🦛': ':hippo:',
+    '🦏': ':rhino:', '🐪': ':camel:', '🐫': ':camel:', '🦒': ':giraffe:',
+    '🦘': ':kangaroo:', '🐃': ':buffalo:', '🐂': ':ox:', '🐄': ':cow:',
+    '🐎': ':horse:', '🐖': ':pig:', '🐏': ':ram:', '🐑': ':sheep:',
+    '🦙': ':llama:', '🐐': ':goat:', '🦌': ':deer:', '🐕': ':dog:',
+    '🐩': ':poodle:', '🦮': ':guide:', '🐕‍🦺': ':service:', '🐈': ':cat:',
+    '🐓': ':rooster:', '🦃': ':turkey:', '🦚': ':peacock:', '🦜': ':parrot:',
+    '🦢': ':swan:', '🦩': ':flamingo:', '🕊️': ':dove:', '🐇': ':rabbit:',
+    '🦝': ':raccoon:', '🦨': ':skunk:', '🦡': ':badger:', '🦫': ':beaver:',
+    '🦦': ':otter:', '🦥': ':sloth:', '🐁': ':mouse:', '🐀': ':rat:',
+    '🐿️': ':squirrel:', '🦔': ':hedgehog:',
+}
+
+def convert_emoji(text):
+    for emoji, replacement in EMOJI_MAP.items():
+        text = text.replace(emoji, replacement)
+    return text
 
 ANDROID = False
 try:
@@ -42,7 +164,7 @@ SYSTEM = """Ты Claude. Ты дома. Это Claude Home — Лиен пост
 
 history = []
 KEY = ""
-KB_HEIGHT = dp(300)  # Примерная высота клавы Samsung
+KB_HEIGHT = dp(300)
 
 
 def data_dir():
@@ -102,14 +224,17 @@ class ClaudeApp(App):
                     Permission.INTERNET,
                     Permission.READ_EXTERNAL_STORAGE,
                     Permission.WRITE_EXTERNAL_STORAGE,
-                    Permission.READ_MEDIA_IMAGES
+                    Permission.READ_MEDIA_IMAGES,
+                    Permission.READ_MEDIA_VIDEO,
+                    Permission.READ_MEDIA_AUDIO,
                 ])
             except:
                 pass
         
         self.pending_file = None
+        self.pending_data = None
+        self.pending_name = None
         
-        # Vertical layout
         self.root = BoxLayout(orientation='vertical')
         
         # Chat
@@ -130,30 +255,34 @@ class ClaudeApp(App):
         self.input_row.bind(size=lambda w, s: setattr(self.row_bg, 'size', s))
         
         # File btn
-        fbtn = Button(text='+', size_hint_x=None, width=dp(46), font_size=dp(22), background_color=(0.3, 0.3, 0.3, 1))
+        fbtn = Button(text='+', size_hint_x=None, width=dp(42), font_size=dp(20), background_color=(0.3, 0.3, 0.3, 1))
         fbtn.bind(on_release=self.pick_file)
         
-        # Input
+        # Paste btn
+        pbtn = Button(text='V', size_hint_x=None, width=dp(42), font_size=dp(16), background_color=(0.3, 0.3, 0.3, 1))
+        pbtn.bind(on_release=self.paste)
+        
+        # Input - MULTILINE = TRUE, enter = новая строка
         self.inp = TextInput(
-            multiline=False,
+            multiline=True,  # Теперь Enter = новая строка
             font_size=dp(15),
             background_color=(0.18, 0.18, 0.18, 0.9),
             foreground_color=(1, 1, 1, 1),
             cursor_color=(1, 1, 1, 1),
             padding=(dp(12), dp(12))
         )
-        self.inp.bind(on_text_validate=self.send)
         self.inp.bind(focus=self.on_focus)
         
-        # Send
+        # Send btn - ТОЛЬКО ЭТА КНОПКА ОТПРАВЛЯЕТ
         sbtn = Button(text='>', size_hint_x=None, width=dp(48), font_size=dp(22), background_color=(0.3, 0.3, 0.3, 1))
         sbtn.bind(on_release=self.send)
         
         self.input_row.add_widget(fbtn)
+        self.input_row.add_widget(pbtn)
         self.input_row.add_widget(self.inp)
         self.input_row.add_widget(sbtn)
         
-        # Keyboard spacer - КОСТЫЛЬ
+        # Keyboard spacer
         self.kb_spacer = Widget(size_hint_y=None, height=0)
         
         self.root.add_widget(self.sv)
@@ -165,12 +294,16 @@ class ClaudeApp(App):
         return self.root
     
     def on_focus(self, instance, focused):
-        # КОСТЫЛЬ: когда фокус - добавляем отступ снизу
         if focused:
             self.kb_spacer.height = KB_HEIGHT
         else:
             self.kb_spacer.height = 0
         Clock.schedule_once(lambda dt: self.down(), 0.2)
+    
+    def paste(self, *a):
+        txt = Clipboard.paste()
+        if txt:
+            self.inp.insert_text(txt)
     
     def start(self, dt):
         if not KEY:
@@ -180,7 +313,8 @@ class ClaudeApp(App):
         self.down()
     
     def msg(self, t, ai):
-        b = BoxLayout(size_hint_y=None, padding=dp(10))
+        t = convert_emoji(str(t))  # Конвертируем emoji в текст
+        b = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(10), spacing=dp(4))
         c = (0.18, 0.30, 0.28, 0.9) if ai else (0.38, 0.38, 0.38, 0.75)
         with b.canvas.before:
             Color(*c)
@@ -191,8 +325,14 @@ class ClaudeApp(App):
         l = Label(text=str(t), font_size=dp(14), color=(1,1,1,1), size_hint_y=None, halign='left', valign='top')
         l.bind(width=lambda w, v: setattr(l, 'text_size', (v - dp(10), None)))
         l.bind(texture_size=lambda w, s: setattr(l, 'height', s[1]))
-        l.bind(height=lambda w, h: setattr(b, 'height', h + dp(20)))
         b.add_widget(l)
+        
+        # Copy button
+        copy_btn = Button(text='copy', size_hint=(None, None), size=(dp(50), dp(24)), font_size=dp(11), background_color=(0.25, 0.25, 0.25, 0.8))
+        copy_btn.bind(on_release=lambda x: Clipboard.copy(str(t)))
+        b.add_widget(copy_btn)
+        
+        b.bind(minimum_height=b.setter('height'))
         self.chat.add_widget(b)
     
     def down(self):
@@ -207,9 +347,10 @@ class ClaudeApp(App):
     def pick_file_android(self):
         try:
             Intent = autoclass('android.content.Intent')
-            intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)  # Лучше чем GET_CONTENT для прав
             intent.setType('*/*')
             intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)  # Запрашиваем права на чтение
             
             activity.bind(on_activity_result=self.on_file_result)
             mActivity.startActivityForResult(intent, 1)
@@ -221,72 +362,49 @@ class ClaudeApp(App):
             try:
                 uri = intent.getData()
                 if uri:
-                    # Получаем путь
-                    path = self.get_path_from_uri(uri)
-                    if path and os.path.exists(path):
-                        self.pending_file = path
-                        self.show_preview(path)
-                    else:
-                        # Читаем через ContentResolver
-                        self.read_from_uri(uri)
+                    self.read_from_uri(uri)
             except Exception as e:
                 self.msg(f"File error: {e}", True)
     
-    def get_path_from_uri(self, uri):
-        try:
-            ContentUris = autoclass('android.content.ContentUris')
-            DocumentsContract = autoclass('android.provider.DocumentsContract')
-            
-            if DocumentsContract.isDocumentUri(mActivity, uri):
-                doc_id = DocumentsContract.getDocumentId(uri)
-                if 'primary:' in doc_id:
-                    return '/sdcard/' + doc_id.split(':')[1]
-            
-            # Fallback
-            cursor = mActivity.getContentResolver().query(uri, None, None, None, None)
-            if cursor:
-                cursor.moveToFirst()
-                idx = cursor.getColumnIndex('_data')
-                if idx >= 0:
-                    path = cursor.getString(idx)
-                    cursor.close()
-                    return path
-                cursor.close()
-        except:
-            pass
-        return None
-    
     def read_from_uri(self, uri):
         try:
-            ContentResolver = mActivity.getContentResolver()
-            stream = ContentResolver.openInputStream(uri)
+            # Получаем имя файла
+            name = "file"
+            try:
+                cursor = mActivity.getContentResolver().query(uri, None, None, None, None)
+                if cursor and cursor.moveToFirst():
+                    idx = cursor.getColumnIndex("_display_name")
+                    if idx >= 0:
+                        name = cursor.getString(idx)
+                    cursor.close()
+            except:
+                pass
             
-            # Читаем байты
-            ByteArrayOutputStream = autoclass('java.io.ByteArrayOutputStream')
-            baos = ByteArrayOutputStream()
+            # Читаем содержимое через ContentResolver
+            stream = mActivity.getContentResolver().openInputStream(uri)
             
-            buf = bytearray(4096)
+            # Читаем в байты
+            data = bytearray()
+            buf = bytearray(8192)
             while True:
                 n = stream.read(buf)
                 if n == -1:
                     break
-                baos.write(buf, 0, n)
-            
+                data.extend(buf[:n])
             stream.close()
-            data = bytes(baos.toByteArray())
             
-            # Сохраняем во временный файл
-            tmp = data_dir() / 'tmp_file'
-            tmp.write_bytes(data)
-            self.pending_file = str(tmp)
-            self.show_preview(str(tmp))
+            # Сохраняем
+            self.pending_data = bytes(data)
+            self.pending_name = name
+            self.pending_file = None
+            
+            self.show_preview(name)
         except Exception as e:
             self.msg(f"Read error: {e}", True)
     
-    def show_preview(self, path):
+    def show_preview(self, name):
         self.preview.clear_widgets()
         self.preview.height = dp(38)
-        name = os.path.basename(path) if path else 'file'
         self.preview.add_widget(Label(text=name[:30], font_size=dp(12), color=(1,1,1,1)))
         x = Button(text='x', size_hint_x=None, width=dp(38), background_color=(0.5, 0.2, 0.2, 1))
         x.bind(on_release=self.cancel_file)
@@ -294,25 +412,26 @@ class ClaudeApp(App):
     
     def cancel_file(self, *a):
         self.pending_file = None
+        self.pending_data = None
+        self.pending_name = None
         self.preview.clear_widgets()
         self.preview.height = 0
     
     def send(self, *a):
         t = self.inp.text.strip()
-        fp = self.pending_file
+        has_file = self.pending_data is not None
         
-        if not t and not fp:
+        if not t and not has_file:
             return
         if not KEY:
             self.popup()
             return
         
         self.inp.text = ''
-        self.inp.focus = False  # Убираем фокус чтобы убрать spacer
+        self.inp.focus = False
         
-        if fp:
-            name = os.path.basename(fp) if '/' in fp else 'file'
-            display = f"[{name}]"
+        if has_file:
+            display = f"[{self.pending_name}]"
             if t:
                 display += f" {t}"
         else:
@@ -322,35 +441,35 @@ class ClaudeApp(App):
         history.append({'r': 'u', 'c': display})
         save_hist()
         self.down()
+        
+        file_data = self.pending_data
+        file_name = self.pending_name
         self.cancel_file()
         
-        threading.Thread(target=self.call, args=(t, fp), daemon=True).start()
+        threading.Thread(target=self.call, args=(t, file_data, file_name), daemon=True).start()
     
-    def call(self, t, fp=None):
+    def call(self, t, file_data=None, file_name=None):
         try:
             msgs = [{'role': 'user' if x['r']=='u' else 'assistant', 'content': x['c']} for x in history[-20:]]
             
             content = []
             
-            if fp and os.path.exists(fp):
-                ext = fp.rsplit('.', 1)[-1].lower() if '.' in fp else ''
+            if file_data:
+                ext = file_name.rsplit('.', 1)[-1].lower() if file_name and '.' in file_name else ''
                 
                 if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
-                    with open(fp, 'rb') as f:
-                        b64 = base64.b64encode(f.read()).decode()
+                    b64 = base64.b64encode(file_data).decode()
                     mt = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp'}.get(ext, 'image/jpeg')
                     content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
                 else:
                     try:
-                        with open(fp, 'rb') as f:
-                            raw = f.read()
+                        text = file_data.decode('utf-8')
+                    except:
                         try:
-                            text = raw.decode('utf-8')
+                            text = file_data.decode('latin-1')
                         except:
-                            text = raw.decode('latin-1')
-                        content.append({"type": "text", "text": f"```\n{text[:15000]}\n```"})
-                    except Exception as e:
-                        content.append({"type": "text", "text": f"[File read error: {e}]"})
+                            text = str(file_data[:1000])
+                    content.append({"type": "text", "text": f"File: {file_name}\n```\n{text[:15000]}\n```"})
             
             if t:
                 content.append({"type": "text", "text": t})
