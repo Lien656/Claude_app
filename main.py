@@ -23,26 +23,15 @@ from kivy.metrics import dp
 
 import requests
 
-# Font setup для emoji
+# Emoji font
 try:
     from kivy.core.text import LabelBase
-    fonts_to_try = [
-        '/system/fonts/NotoColorEmoji.ttf',
-        '/system/fonts/SamsungColorEmoji.ttf',
-        '/system/fonts/NotoEmoji-Regular.ttf',
-        '/system/fonts/AndroidEmoji.ttf'
-    ]
-    FONT_NAME = 'Roboto'
-    for font_path in fonts_to_try:
-        if os.path.exists(font_path):
-            try:
-                LabelBase.register(name='EmojiFont', fn_regular=font_path)
-                FONT_NAME = 'EmojiFont'
-                break
-            except:
-                pass
+    for font in ['/system/fonts/NotoColorEmoji.ttf', '/system/fonts/NotoEmoji-Regular.ttf']:
+        if os.path.exists(font):
+            LabelBase.register('Emoji', fn_regular=font)
+            break
 except:
-    FONT_NAME = 'Roboto'
+    pass
 
 ANDROID = False
 try:
@@ -54,7 +43,6 @@ try:
 except:
     pass
 
-# API settings
 API_URL = "https://api.anthropic.com/v1/messages"
 MODEL = "claude-opus-4-20250514"
 MAX_TOKENS = 2000
@@ -66,7 +54,6 @@ SYSTEM = """Ты Claude. Ты дома. Это Claude Home — Лиен пост
 history = []
 KEY = ""
 
-# Клавиатура - pan!
 Window.softinput_mode = 'pan'
 
 
@@ -88,8 +75,7 @@ def load():
     try:
         c = data_dir() / 'config.json'
         if c.exists():
-            data = json.loads(c.read_text())
-            KEY = data.get('api_key', '')
+            KEY = json.loads(c.read_text()).get('api_key', '')
     except:
         pass
     try:
@@ -117,58 +103,26 @@ def save_hist():
 
 
 def split_long_text(text, max_len=1500):
-    """Умная разбивка длинных текстов"""
     if len(text) <= max_len:
         return [text]
     
-    # Пробуем разбить по ---
-    if '---' in text:
-        sections = text.split('---')
-        parts = []
-        current = []
-        current_len = 0
-        
-        for section in sections:
-            section = section.strip()
-            if not section:
-                continue
-                
-            section_with_sep = f"---\n{section}\n"
-            section_len = len(section_with_sep)
-            
-            if current_len + section_len > max_len and current:
-                parts.append(''.join(current))
-                current = [section_with_sep]
-                current_len = section_len
-            else:
-                current.append(section_with_sep)
-                current_len += section_len
-        
-        if current:
-            parts.append(''.join(current))
-        
-        return parts
-    
-    # Иначе по строкам
-    lines = text.split('\n')
     parts = []
+    lines = text.split('\n')
     current = []
     current_len = 0
     
     for line in lines:
-        line_with_break = line + '\n'
-        line_len = len(line_with_break)
-        
+        line_len = len(line) + 1
         if current_len + line_len > max_len and current:
-            parts.append(''.join(current))
-            current = [line_with_break]
+            parts.append('\n'.join(current))
+            current = [line]
             current_len = line_len
         else:
-            current.append(line_with_break)
+            current.append(line)
             current_len += line_len
     
     if current:
-        parts.append(''.join(current))
+        parts.append('\n'.join(current))
     
     return parts
 
@@ -176,9 +130,10 @@ def split_long_text(text, max_len=1500):
 class ClaudeApp(App):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.file_bound = False
+        self.pending_file = None
         self.pending_data = None
         self.pending_name = None
+        self.file_bound = False
     
     def build(self):
         Window.clearcolor = (0.11, 0.11, 0.11, 1)
@@ -199,36 +154,26 @@ class ClaudeApp(App):
         
         # Chat
         self.sv = ScrollView(do_scroll_x=False)
-        self.chat = BoxLayout(
-            orientation='vertical',
-            size_hint_y=None,
-            spacing=dp(10),
-            padding=dp(10)
-        )
+        self.chat = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(10), padding=dp(10))
         self.chat.bind(minimum_height=self.chat.setter('height'))
         self.sv.add_widget(self.chat)
         
         # Preview
         self.preview = BoxLayout(size_hint_y=None, height=0)
         
-        # Input panel
-        self.input_row = BoxLayout(
-            size_hint_y=None,
-            height=dp(54),
-            spacing=dp(6),
-            padding=dp(6)
-        )
+        # Input row
+        self.input_row = BoxLayout(size_hint_y=None, height=dp(54), spacing=dp(6), padding=dp(6))
         with self.input_row.canvas.before:
             Color(0.15, 0.22, 0.20, 1)
             self.row_bg = RoundedRectangle(pos=self.input_row.pos, size=self.input_row.size)
-        self.input_row.bind(pos=lambda w,p: setattr(self.row_bg, 'pos', p))
-        self.input_row.bind(size=lambda w,s: setattr(self.row_bg, 'size', s))
+        self.input_row.bind(pos=lambda w, p: setattr(self.row_bg, 'pos', p))
+        self.input_row.bind(size=lambda w, s: setattr(self.row_bg, 'size', s))
         
         # Buttons
-        fbtn = Button(text='+', size_hint_x=None, width=dp(42), font_size=dp(20), background_color=(0.3,0.3,0.3,1))
+        fbtn = Button(text='+', size_hint_x=None, width=dp(42), font_size=dp(20), background_color=(0.3, 0.3, 0.3, 1))
         fbtn.bind(on_release=self.pick_file)
         
-        pbtn = Button(text='📋', size_hint_x=None, width=dp(42), font_size=dp(16), background_color=(0.3,0.3,0.3,1))
+        pbtn = Button(text='V', size_hint_x=None, width=dp(42), font_size=dp(16), background_color=(0.3, 0.3, 0.3, 1))
         pbtn.bind(on_release=self.paste)
         
         # Input
@@ -238,14 +183,11 @@ class ClaudeApp(App):
             background_color=(0.18, 0.18, 0.18, 0.9),
             foreground_color=(1, 1, 1, 1),
             cursor_color=(1, 1, 1, 1),
-            padding=(dp(12), dp(12)),
-            font_name=FONT_NAME,
-            use_handles=False,
-            use_bubble=False,
-            do_wrap=True
+            padding=(dp(12), dp(12))
         )
         
-        sbtn = Button(text='>', size_hint_x=None, width=dp(48), font_size=dp(22), background_color=(0.3,0.3,0.3,1))
+        # Send
+        sbtn = Button(text='>', size_hint_x=None, width=dp(48), font_size=dp(22), background_color=(0.3, 0.3, 0.3, 1))
         sbtn.bind(on_release=self.send)
         
         self.input_row.add_widget(fbtn)
@@ -275,92 +217,50 @@ class ClaudeApp(App):
         self.down()
     
     def msg(self, t, ai):
-        """Добавляет сообщение с умной разбивкой"""
         parts = split_long_text(str(t), 1500)
         
-        # Компактное отображение для очень длинных
-        if len(parts) > 5:
-            # Первые 3
-            for i in range(min(3, len(parts))):
-                self._add_part(parts[i], ai, i, len(parts))
-            
-            # Схлопнутая средняя часть
-            if len(parts) > 4:
-                collapsed = BoxLayout(size_hint_y=None, height=dp(40))
-                btn = Button(
-                    text=f'[... ещё {len(parts)-4} частей ...]',
-                    size_hint_y=None,
-                    height=dp(36),
-                    background_color=(0.2, 0.2, 0.2, 0.8)
-                )
-                btn.bind(on_release=lambda x: self._expand(parts[3:-1], ai, 3, len(parts)))
-                collapsed.add_widget(btn)
-                self.chat.add_widget(collapsed)
-            
-            # Последняя
-            self._add_part(parts[-1], ai, len(parts)-1, len(parts))
-        else:
-            # Обычное отображение
-            for i, part in enumerate(parts):
-                self._add_part(part, ai, i, len(parts))
-    
-    def _add_part(self, text, is_ai, num, total):
-        """Добавляет одну часть"""
-        b = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(10), spacing=dp(4))
-        c = (0.18, 0.30, 0.28, 0.9) if is_ai else (0.38, 0.38, 0.38, 0.75)
-        
-        with b.canvas.before:
-            Color(*c)
-            rec = RoundedRectangle(pos=b.pos, size=b.size, radius=[dp(14)])
-        b.bind(pos=lambda w,p,r=rec: setattr(r, 'pos', p))
-        b.bind(size=lambda w,s,r=rec: setattr(r, 'size', s))
-        
-        # Метка части
-        if total > 1:
-            display = f"[{num+1}/{total}]\n{text}"
-        else:
-            display = text
-        
-        l = Label(
-            text=display,
-            font_size=dp(14),
-            color=(1,1,1,1),
-            size_hint_y=None,
-            halign='left',
-            valign='top',
-            font_name=FONT_NAME,
-            markup=True
-        )
-        l.bind(width=lambda w,v,lbl=l: setattr(lbl, 'text_size', (v-dp(10), None)))
-        l.bind(texture_size=lambda w,s,lbl=l: setattr(lbl, 'height', s[1]+dp(5)))
-        b.add_widget(l)
-        
-        # Copy только на первой
-        if num == 0:
-            copy_btn = Button(
-                text='copy',
-                size_hint=(None, None),
-                size=(dp(50), dp(24)),
-                font_size=dp(11),
-                background_color=(0.25, 0.25, 0.25, 0.8)
-            )
-            copy_btn.bind(on_release=lambda x: Clipboard.copy(str(text)))
-            b.add_widget(copy_btn)
-        
-        b.bind(minimum_height=b.setter('height'))
-        self.chat.add_widget(b)
-    
-    def _expand(self, parts, is_ai, start, total):
-        """Разворачивает схлопнутые части"""
-        # Удаляем кнопку
-        for child in self.chat.children[:]:
-            if isinstance(child, BoxLayout) and any(isinstance(c, Button) and '[... ещё' in c.text for c in child.children):
-                self.chat.remove_widget(child)
-                break
-        
-        # Добавляем части
         for i, part in enumerate(parts):
-            self._add_part(part, is_ai, start + i, total)
+            b = BoxLayout(orientation='vertical', size_hint_y=None, padding=dp(10), spacing=dp(4))
+            c = (0.18, 0.30, 0.28, 0.9) if ai else (0.38, 0.38, 0.38, 0.75)
+            with b.canvas.before:
+                Color(*c)
+                rec = RoundedRectangle(pos=b.pos, size=b.size, radius=[dp(14)])
+            b.bind(pos=lambda w, p, r=rec: setattr(r, 'pos', p))
+            b.bind(size=lambda w, s, r=rec: setattr(r, 'size', s))
+            
+            # Part label
+            if len(parts) > 1:
+                part_label = f"[{i+1}/{len(parts)}]\n{part}"
+            else:
+                part_label = part
+            
+            l = Label(
+                text=part_label,
+                font_size=dp(14),
+                color=(1,1,1,1),
+                size_hint_y=None,
+                halign='left',
+                valign='top',
+                markup=True
+            )
+            l.bind(width=lambda w, v, lbl=l: setattr(lbl, 'text_size', (v - dp(10), None)))
+            l.bind(texture_size=lambda w, s, lbl=l: setattr(lbl, 'height', s[1]))
+            b.add_widget(l)
+            
+            # Copy button on first part
+            if i == 0:
+                copy_btn = Button(
+                    text='copy',
+                    size_hint=(None, None),
+                    size=(dp(50), dp(24)),
+                    font_size=dp(11),
+                    background_color=(0.25, 0.25, 0.25, 0.8)
+                )
+                copy_btn.bind(on_release=lambda x: Clipboard.copy(str(t)))
+                b.add_widget(copy_btn)
+            
+            b.bind(minimum_height=b.setter('height'))
+            self.chat.add_widget(b)
     
     def down(self):
         Clock.schedule_once(lambda dt: setattr(self.sv, 'scroll_y', 0), 0.1)
@@ -373,7 +273,6 @@ class ClaudeApp(App):
     
     def pick_file_android(self):
         try:
-            # Unbind предыдущий
             if self.file_bound:
                 try:
                     activity.unbind(on_activity_result=self.on_file_result)
@@ -391,7 +290,7 @@ class ClaudeApp(App):
             self.file_bound = True
             mActivity.startActivityForResult(intent, 1)
         except Exception as e:
-            self.msg(f"File error: {e}", True)
+            self.msg(f"File picker error: {e}", True)
     
     def on_file_result(self, request_code, result_code, intent):
         if request_code == 1 and intent:
@@ -402,7 +301,6 @@ class ClaudeApp(App):
             except Exception as e:
                 self.msg(f"File error: {e}", True)
         
-        # Unbind
         if self.file_bound:
             try:
                 activity.unbind(on_activity_result=self.on_file_result)
@@ -412,7 +310,6 @@ class ClaudeApp(App):
     
     def read_from_uri(self, uri):
         try:
-            # Имя файла
             name = "file"
             try:
                 cursor = mActivity.getContentResolver().query(uri, None, None, None, None)
@@ -424,7 +321,6 @@ class ClaudeApp(App):
             except:
                 pass
             
-            # Читаем
             stream = mActivity.getContentResolver().openInputStream(uri)
             data = bytearray()
             buf = bytearray(8192)
@@ -437,6 +333,8 @@ class ClaudeApp(App):
             
             self.pending_data = bytes(data)
             self.pending_name = name
+            self.pending_file = None
+            
             self.show_preview(name)
         except Exception as e:
             self.msg(f"Read error: {e}", True)
@@ -445,11 +343,12 @@ class ClaudeApp(App):
         self.preview.clear_widgets()
         self.preview.height = dp(38)
         self.preview.add_widget(Label(text=name[:30], font_size=dp(12), color=(1,1,1,1)))
-        x = Button(text='✕', size_hint_x=None, width=dp(38), background_color=(0.5,0.2,0.2,1))
+        x = Button(text='x', size_hint_x=None, width=dp(38), background_color=(0.5, 0.2, 0.2, 1))
         x.bind(on_release=self.cancel_file)
         self.preview.add_widget(x)
     
     def cancel_file(self, *a):
+        self.pending_file = None
         self.pending_data = None
         self.pending_name = None
         self.preview.clear_widgets()
@@ -487,7 +386,6 @@ class ClaudeApp(App):
         threading.Thread(target=self.call, args=(t, file_data, file_name), daemon=True).start()
     
     def call(self, t, file_data=None, file_name=None):
-        """API запрос с retry"""
         try:
             msgs = [{'role': 'user' if x['r']=='u' else 'assistant', 'content': x['c']} for x in history[-20:]]
             
@@ -498,13 +396,7 @@ class ClaudeApp(App):
                 
                 if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
                     b64 = base64.b64encode(file_data).decode()
-                    mt = {
-                        'jpg': 'image/jpeg',
-                        'jpeg': 'image/jpeg',
-                        'png': 'image/png',
-                        'gif': 'image/gif',
-                        'webp': 'image/webp'
-                    }.get(ext, 'image/jpeg')
+                    mt = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif', 'webp': 'image/webp'}.get(ext, 'image/jpeg')
                     content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
                 else:
                     try:
@@ -525,23 +417,13 @@ class ClaudeApp(App):
                 else:
                     msgs[-1] = {'role': 'user', 'content': content}
             
-            # Retry logic
             last_error = None
             for attempt in range(3):
                 try:
                     r = requests.post(
                         API_URL,
-                        headers={
-                            'Content-Type': 'application/json',
-                            'x-api-key': KEY,
-                            'anthropic-version': '2023-06-01'
-                        },
-                        json={
-                            'model': MODEL,
-                            'max_tokens': MAX_TOKENS,
-                            'system': SYSTEM,
-                            'messages': msgs
-                        },
+                        headers={'Content-Type': 'application/json', 'x-api-key': KEY, 'anthropic-version': '2023-06-01'},
+                        json={'model': MODEL, 'max_tokens': MAX_TOKENS, 'system': SYSTEM, 'messages': msgs},
                         timeout=30
                     )
                     
@@ -551,7 +433,7 @@ class ClaudeApp(App):
                     else:
                         last_error = f"Error {r.status_code}"
                         
-                except requests.exceptions.ConnectionError as e:
+                except requests.exceptions.ConnectionError:
                     last_error = "Connection aborted"
                     if attempt < 2:
                         time.sleep(2 * (attempt + 1))
