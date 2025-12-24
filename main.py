@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import threading
 import time
+import history_search
 import json
 import gc
 from pathlib import Path
