@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import threading
-import time
 import json
 import gc
 from pathlib import Path
@@ -10,7 +9,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
-from kivy.uix.image import Image
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, RoundedRectangle
@@ -18,19 +16,14 @@ from kivy.metrics import dp
 from kivy.core.text import LabelBase
 from kivy.uix.popup import Popup
 
-from plyer import filechooser
-
-import chat_simple
-import history_search   # 🔍 поиск
+import api_client          # ✅ безопасный клиент
+import history_search      # 🔍 поиск
 
 # -----------------------------
 # PATHS / DATA
 # -----------------------------
 DATA_DIR = Path.home() / ".claude_home"
-FILES_DIR = DATA_DIR / "files"
 DATA_DIR.mkdir(exist_ok=True)
-FILES_DIR.mkdir(exist_ok=True)
-
 HISTORY_FILE = DATA_DIR / "history.json"
 
 # -----------------------------
@@ -44,8 +37,7 @@ if Path("NotoColorEmoji-Regular.ttf").exists():
 Window.clearcolor = (0.08, 0.10, 0.10, 1)
 Window.softinput_mode = "pan"
 
-MAX_CHUNK = 500
-MAX_WIDGETS = 150
+MAX_WIDGETS = 120
 
 # -----------------------------
 # UI ELEMENTS
@@ -102,7 +94,7 @@ class ClaudeHome(App):
         root = BoxLayout(orientation="vertical")
 
         # 🔍 SEARCH BAR
-        self.search_bar = BoxLayout(
+        search_bar = BoxLayout(
             size_hint_y=None,
             height=dp(44),
             padding=(dp(8), dp(6)),
@@ -120,10 +112,10 @@ class ClaudeHome(App):
         search_btn = Button(text="Найти", size_hint_x=None, width=dp(80))
         search_btn.bind(on_release=self.do_search)
 
-        self.search_bar.add_widget(self.search_input)
-        self.search_bar.add_widget(search_btn)
+        search_bar.add_widget(self.search_input)
+        search_bar.add_widget(search_btn)
 
-        root.add_widget(self.search_bar)
+        root.add_widget(search_bar)
 
         # CHAT
         self.scroll = ScrollView(do_scroll_x=False)
@@ -137,16 +129,17 @@ class ClaudeHome(App):
         self.scroll.add_widget(self.chat)
 
         # INPUT BAR
-        self.input_bar = BoxLayout(
+        input_bar = BoxLayout(
             size_hint_y=None,
             height=dp(64),
             padding=dp(8),
             spacing=dp(6)
         )
-        with self.input_bar.canvas.before:
+        with input_bar.canvas.before:
             Color(0.10, 0.16, 0.16, 0.85)
             self.ibg = RoundedRectangle(radius=[dp(22)])
-        self.input_bar.bind(pos=self._ibg, size=self._ibg)
+        input_bar.bind(pos=lambda *_: setattr(self.ibg, "pos", input_bar.pos),
+                       size=lambda *_: setattr(self.ibg, "size", input_bar.size))
 
         self.inp = TextInput(
             multiline=True,
@@ -156,29 +149,17 @@ class ClaudeHome(App):
             foreground_color=(1, 1, 1, 1)
         )
 
-        attach = Button(text="📎", size_hint_x=None, width=dp(48))
-        attach.bind(on_release=self.pick_file)
-
-        save = Button(text="💾", size_hint_x=None, width=dp(48))
-        save.bind(on_release=self.export_chat)
-
         send = Button(text="➤", size_hint_x=None, width=dp(56))
         send.bind(on_release=self.send)
 
-        self.input_bar.add_widget(attach)
-        self.input_bar.add_widget(self.inp)
-        self.input_bar.add_widget(save)
-        self.input_bar.add_widget(send)
+        input_bar.add_widget(self.inp)
+        input_bar.add_widget(send)
 
         root.add_widget(self.scroll)
-        root.add_widget(self.input_bar)
+        root.add_widget(input_bar)
 
         Clock.schedule_interval(lambda dt: gc.collect(), 30)
         return root
-
-    def _ibg(self, *a):
-        self.ibg.pos = self.input_bar.pos
-        self.ibg.size = self.input_bar.size
 
     # -------------------------
     # HISTORY
@@ -186,8 +167,9 @@ class ClaudeHome(App):
     def load_history(self):
         if HISTORY_FILE.exists():
             try:
-                self.history = json.loads(HISTORY_FILE.read_text("utf-8"))
-            except:
+                txt = HISTORY_FILE.read_text("utf-8").strip()
+                self.history = json.loads(txt) if txt else []
+            except Exception:
                 self.history = []
 
     def save_history(self):
@@ -220,9 +202,9 @@ class ClaudeHome(App):
 
         for msg in results:
             btn = Button(
-                text=msg["content"][:600],
+                text=msg["content"][:500],
                 size_hint_y=None,
-                height=dp(60)
+                height=dp(56)
             )
             btn.bind(on_release=lambda _, t=msg["content"]:
                      setattr(self.inp, "text", self.inp.text + "\n" + t))
@@ -264,14 +246,15 @@ class ClaudeHome(App):
         self.scroll_down()
 
         ab = self.add_bubble()
-        threading.Thread(target=self.call_ai, args=(text, ab), daemon=True).start()
+        threading.Thread(
+            target=self.call_ai,
+            args=(text, ab),
+            daemon=True
+        ).start()
 
     def call_ai(self, text, bubble):
         try:
-            full = chat_simple.send_message(
-                chat_simple.API_KEY,
-                [{"role": "user", "content": text}]
-            )
+            full = api_client.send_message(text)
         except Exception as e:
             Clock.schedule_once(lambda dt: bubble.add_widget(ChunkText(str(e))))
             return
@@ -279,41 +262,8 @@ class ClaudeHome(App):
         self.history.append({"role": "assistant", "content": full})
         self.save_history()
 
-        buf = ""
-        for ch in full:
-            buf += ch
-            if len(buf) >= MAX_CHUNK:
-                part = buf
-                buf = ""
-                Clock.schedule_once(lambda dt, p=part: bubble.add_widget(ChunkText(p)))
-                time.sleep(0.01)
-
-        if buf:
-            Clock.schedule_once(lambda dt: bubble.add_widget(ChunkText(buf)))
+        Clock.schedule_once(lambda dt: bubble.add_widget(ChunkText(full)))
         Clock.schedule_once(lambda dt: self.scroll_down())
-
-    # -------------------------
-    # FILES / EXPORT
-    # -------------------------
-    def pick_file(self, *a):
-        filechooser.open_file(on_selection=self.on_file)
-
-    def on_file(self, selection):
-        if not selection:
-            return
-        path = Path(selection[0])
-        if path.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]:
-            popup = Popup(title=path.name, size_hint=(0.9, 0.9))
-            popup.content = Image(source=str(path), allow_stretch=True, keep_ratio=True)
-            popup.open()
-
-    def export_chat(self, *a):
-        out = DATA_DIR / "chat_export.txt"
-        lines = []
-        for m in self.history:
-            lines.append(f"{m['role'].upper()}:\n{m['content']}\n")
-            lines.append("-" * 40)
-        out.write_text("\n".join(lines), encoding="utf-8")
 
 
 # -----------------------------
