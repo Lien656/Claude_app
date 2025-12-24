@@ -481,6 +481,3 @@ class ClaudeApp(App):
 
 if __name__ == '__main__':
     ClaudeApp().run()
-
-if __name__ == '__main__':
-    ClaudeApp().run()
