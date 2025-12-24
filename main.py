@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import threading
 import time
-import history_search
 import json
 import gc
 from pathlib import Path
@@ -22,9 +21,10 @@ from kivy.uix.popup import Popup
 from plyer import filechooser
 
 import chat_simple
+import history_search   # 🔍 поиск
 
 # -----------------------------
-# PATHS
+# PATHS / DATA
 # -----------------------------
 DATA_DIR = Path.home() / ".claude_home"
 FILES_DIR = DATA_DIR / "files"
@@ -48,12 +48,17 @@ MAX_CHUNK = 500
 MAX_WIDGETS = 150
 
 # -----------------------------
-# UI
+# UI ELEMENTS
 # -----------------------------
 class GlassBubble(BoxLayout):
     def __init__(self, **kw):
-        super().__init__(orientation="vertical", size_hint_y=None,
-                         padding=dp(12), spacing=dp(6), **kw)
+        super().__init__(
+            orientation="vertical",
+            size_hint_y=None,
+            padding=dp(12),
+            spacing=dp(6),
+            **kw
+        )
         with self.canvas.before:
             Color(0.14, 0.20, 0.20, 0.75)
             self.bg = RoundedRectangle(radius=[dp(18)])
@@ -85,7 +90,6 @@ class ChunkText(TextInput):
             texture_size=lambda *_: setattr(self, "height", self.texture_size[1] + dp(10))
         )
 
-
 # -----------------------------
 # APP
 # -----------------------------
@@ -97,35 +101,69 @@ class ClaudeHome(App):
 
         root = BoxLayout(orientation="vertical")
 
+        # 🔍 SEARCH BAR
+        self.search_bar = BoxLayout(
+            size_hint_y=None,
+            height=dp(44),
+            padding=(dp(8), dp(6)),
+            spacing=dp(6)
+        )
+
+        self.search_input = TextInput(
+            hint_text="🔍 поиск по истории",
+            multiline=False,
+            font_name="Default",
+            background_color=(0, 0, 0, 0),
+            foreground_color=(1, 1, 1, 1)
+        )
+
+        search_btn = Button(text="Найти", size_hint_x=None, width=dp(80))
+        search_btn.bind(on_release=self.do_search)
+
+        self.search_bar.add_widget(self.search_input)
+        self.search_bar.add_widget(search_btn)
+
+        root.add_widget(self.search_bar)
+
+        # CHAT
         self.scroll = ScrollView(do_scroll_x=False)
-        self.chat = BoxLayout(orientation="vertical",
-                              size_hint_y=None,
-                              spacing=dp(10),
-                              padding=dp(12))
+        self.chat = BoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            spacing=dp(10),
+            padding=dp(12)
+        )
         self.chat.bind(minimum_height=self.chat.setter("height"))
         self.scroll.add_widget(self.chat)
 
-        # input bar
-        self.input_bar = BoxLayout(size_hint_y=None, height=dp(64),
-                                   padding=dp(8), spacing=dp(6))
+        # INPUT BAR
+        self.input_bar = BoxLayout(
+            size_hint_y=None,
+            height=dp(64),
+            padding=dp(8),
+            spacing=dp(6)
+        )
         with self.input_bar.canvas.before:
             Color(0.10, 0.16, 0.16, 0.85)
             self.ibg = RoundedRectangle(radius=[dp(22)])
         self.input_bar.bind(pos=self._ibg, size=self._ibg)
 
-        self.inp = TextInput(multiline=True, font_name="Default",
-                             font_size=dp(16),
-                             background_color=(0, 0, 0, 0),
-                             foreground_color=(1, 1, 1, 1))
-
-        send = Button(text="➤", size_hint_x=None, width=dp(56))
-        send.bind(on_release=self.send)
+        self.inp = TextInput(
+            multiline=True,
+            font_name="Default",
+            font_size=dp(16),
+            background_color=(0, 0, 0, 0),
+            foreground_color=(1, 1, 1, 1)
+        )
 
         attach = Button(text="📎", size_hint_x=None, width=dp(48))
         attach.bind(on_release=self.pick_file)
 
         save = Button(text="💾", size_hint_x=None, width=dp(48))
         save.bind(on_release=self.export_chat)
+
+        send = Button(text="➤", size_hint_x=None, width=dp(56))
+        send.bind(on_release=self.send)
 
         self.input_bar.add_widget(attach)
         self.input_bar.add_widget(self.inp)
@@ -153,8 +191,51 @@ class ClaudeHome(App):
                 self.history = []
 
     def save_history(self):
-        HISTORY_FILE.write_text(json.dumps(self.history, ensure_ascii=False, indent=2),
-                                encoding="utf-8")
+        HISTORY_FILE.write_text(
+            json.dumps(self.history, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+    # -------------------------
+    # SEARCH
+    # -------------------------
+    def do_search(self, *a):
+        query = self.search_input.text.strip()
+        if not query:
+            return
+
+        results = history_search.search(query)
+        if not results:
+            Popup(
+                title="Поиск",
+                content=ChunkText("Ничего не найдено"),
+                size_hint=(0.7, 0.3)
+            ).open()
+            return
+
+        box = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
+        sv = ScrollView()
+        inner = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(6))
+        inner.bind(minimum_height=inner.setter("height"))
+
+        for msg in results:
+            btn = Button(
+                text=msg["content"][:600],
+                size_hint_y=None,
+                height=dp(60)
+            )
+            btn.bind(on_release=lambda _, t=msg["content"]:
+                     setattr(self.inp, "text", self.inp.text + "\n" + t))
+            inner.add_widget(btn)
+
+        sv.add_widget(inner)
+        box.add_widget(sv)
+
+        Popup(
+            title=f"Найдено: {len(results)}",
+            content=box,
+            size_hint=(0.9, 0.8)
+        ).open()
 
     # -------------------------
     # CHAT
@@ -169,9 +250,6 @@ class ClaudeHome(App):
     def scroll_down(self):
         Clock.schedule_once(lambda dt: setattr(self.scroll, "scroll_y", 0), 0.05)
 
-    # -------------------------
-    # SEND
-    # -------------------------
     def send(self, *a):
         text = self.inp.text.strip()
         if not text:
@@ -215,7 +293,7 @@ class ClaudeHome(App):
         Clock.schedule_once(lambda dt: self.scroll_down())
 
     # -------------------------
-    # FILES
+    # FILES / EXPORT
     # -------------------------
     def pick_file(self, *a):
         filechooser.open_file(on_selection=self.on_file)
@@ -225,22 +303,15 @@ class ClaudeHome(App):
             return
         path = Path(selection[0])
         if path.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]:
-            self.preview_image(path)
+            popup = Popup(title=path.name, size_hint=(0.9, 0.9))
+            popup.content = Image(source=str(path), allow_stretch=True, keep_ratio=True)
+            popup.open()
 
-    def preview_image(self, path):
-        popup = Popup(title=path.name, size_hint=(0.9, 0.9))
-        img = Image(source=str(path), allow_stretch=True, keep_ratio=True)
-        popup.content = img
-        popup.open()
-
-    # -------------------------
-    # EXPORT
-    # -------------------------
     def export_chat(self, *a):
         out = DATA_DIR / "chat_export.txt"
         lines = []
-        for msg in self.history:
-            lines.append(f"{msg['role'].upper()}:\n{msg['content']}\n")
+        for m in self.history:
+            lines.append(f"{m['role'].upper()}:\n{m['content']}\n")
             lines.append("-" * 40)
         out.write_text("\n".join(lines), encoding="utf-8")
 
