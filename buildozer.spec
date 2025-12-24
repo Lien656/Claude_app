@@ -1,3 +1,4 @@
+ini
 [app]
 
 # (str) Title of your application
@@ -19,7 +20,8 @@ source.include_exts = py,png,jpg,jpeg,kv,atlas,json,txt,ttf,otf
 version = 4.1
 
 # (str) Application requirements
-requirements = python3,kivy==2.2.1,requests,certifi,urllib3,charset-normalizer,idna,pillow,plyer,pyjnius,android
+# >>> ИЗМЕНЕНО: Добавлен kivymd для красивого интерфейса <<<
+requirements = python3,kivy==2.2.1,requests,certifi,urllib3,charset-normalizer,idna,pillow,plyer,pyjnius,android,kivymd
 
 # (str) Supported orientation
 orientation = portrait
@@ -94,7 +96,8 @@ android.enable_androidx = True
 #p4a.port =
 
 # Window configuration
-android.window_soft_input_mode = adjustPan
+# >>> ИЗМЕНЕНО: adjustResize лучше для мессенджеров (клавиатура не наезжает) <<<
+android.window_soft_input_mode = adjustResize
 
 [buildozer]
 
