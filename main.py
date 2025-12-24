@@ -25,11 +25,10 @@ import requests
 
 # Emoji font
 from kivy.core.text import LabelBase
-if os.path.exists('NotoColorEmoji.ttf'):
-    LabelBase.register('Emoji', fn_regular='NotoColorEmoji.ttf')
+if os.path.exists('NotoColorEmoji-Regular.ttf'):
+    LabelBase.register('Emoji', fn_regular='NotoColorEmoji-Regular.ttf')
 elif os.path.exists('/system/fonts/NotoColorEmoji.ttf'):
     LabelBase.register('Emoji', fn_regular='/system/fonts/NotoColorEmoji.ttf')
-
 ANDROID = False
 try:
     from android.permissions import request_permissions, Permission
