@@ -14,7 +14,7 @@ try:
     os.environ['SSL_CERT_FILE'] = certifi.where()
     os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
     SSL_VERIFY = certifi.where()
-except Exception:
+except:
     SSL_VERIFY = True
 
 
@@ -24,28 +24,27 @@ class APIError(Exception):
 
 class Anthropic:
     """Клиент Anthropic API"""
-
+    
     def __init__(self, api_key):
         self.api_key = api_key
         self.messages = Messages(self)
-
+    
     def _request(self, payload):
         headers = {
             "x-api-key": self.api_key,
             "content-type": "application/json",
             "anthropic-version": VERSION
         }
-
+        
         try:
             resp = requests.post(
                 API_URL,
                 headers=headers,
                 json=payload,
-                timeout=180,  # запас, но ответы короче
+                timeout=180,
                 verify=SSL_VERIFY
             )
         except requests.exceptions.SSLError:
-            # Fallback без SSL верификации
             resp = requests.post(
                 API_URL,
                 headers=headers,
@@ -53,51 +52,43 @@ class Anthropic:
                 timeout=180,
                 verify=False
             )
-
+        
         if resp.status_code != 200:
             try:
                 err = resp.json()
                 msg = err.get('error', {}).get('message', resp.text[:200])
-            except Exception:
+            except:
                 msg = resp.text[:200]
             raise APIError(f"API {resp.status_code}: {msg}")
-
+        
         return resp.json()
 
 
 class Messages:
     """Интерфейс messages"""
-
+    
     def __init__(self, client):
         self.client = client
-
-    def create(
-        self,
-        model,
-        messages,
-        system="",
-        max_tokens=600,      # 🔢 ОПТИМАЛЬНО ДЛЯ МОБИЛКИ
-        temperature=1.0,     # 🔥 как ты и хотела
-        **kwargs
-    ):
+    
+    def create(self, model, messages, system="", max_tokens=4000, temperature=1.0, **kwargs):
         payload = {
             "model": model,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": messages
         }
-
+        
         if system:
             payload["system"] = system
-
+        
         data = self.client._request(payload)
-
+        
         return Response(data)
 
 
 class Response:
     """Ответ API"""
-
+    
     def __init__(self, data):
         self.data = data
         self.content = [Content(c) for c in data.get('content', [])]
@@ -108,7 +99,7 @@ class Response:
 
 class Content:
     """Контент ответа"""
-
+    
     def __init__(self, data):
         self.type = data.get('type', 'text')
         self.text = data.get('text', '')
