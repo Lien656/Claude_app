@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
 import json
 import base64
 import requests
@@ -8,21 +7,47 @@ from pathlib import Path
 API_URL = "https://api.anthropic.com/v1/messages"
 VERSION = "2023-06-01"
 
-# --- ключ берётся КАК БЫЛ ---
-CFG = Path.home() / ".claude_home" / "config.json"
-API_KEY = json.loads(CFG.read_text()).get("api_key", "")
+_client_api_key = None
 
-HEADERS = {
-    "x-api-key": API_KEY,
-    "anthropic-version": VERSION,
-    "content-type": "application/json",
-}
+
+def _load_api_key():
+    """
+    Безопасная загрузка ключа.
+    НЕ падает на Android, если файла нет.
+    """
+    global _client_api_key
+    if _client_api_key is not None:
+        return _client_api_key
+
+    try:
+        cfg = Path.home() / ".claude_home" / "config.json"
+        if cfg.exists():
+            _client_api_key = json.loads(cfg.read_text()).get("api_key", "")
+        else:
+            _client_api_key = ""
+    except Exception:
+        _client_api_key = ""
+
+    return _client_api_key
+
 
 def _img_to_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
+
 def send_message(user_text, history, system_prompt, image_path=None):
+    api_key = _load_api_key()
+
+    if not api_key:
+        return "API ключ не найден. Проверь config.json."
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": VERSION,
+        "content-type": "application/json",
+    }
+
     messages = history[:]
 
     if image_path:
@@ -51,8 +76,11 @@ def send_message(user_text, history, system_prompt, image_path=None):
         "temperature": 1.0,
     }
 
-    r = requests.post(API_URL, headers=HEADERS, json=payload, timeout=120)
-    data = r.json()
+    try:
+        r = requests.post(API_URL, headers=headers, json=payload, timeout=120)
+        data = r.json()
+    except Exception as e:
+        return "Ошибка соединения с API"
 
     text = ""
     for b in data.get("content", []):
