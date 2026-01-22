@@ -25,8 +25,10 @@ android.archs = arm64-v8a
 android.allow_backup = True
 android.enable_androidx = True
 
-# 🔴 БЫЛО pan → ❌ ломало чат
-# ✅ СТАЛО resize → клавиатура НЕ перекрывает
+# 🔑 КРИТИЧНО ДЛЯ ANDROID 12+
+android.exported = True
+
+# клавиатура
 android.window_soft_input_mode = resize
 
 
