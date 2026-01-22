@@ -26,8 +26,14 @@ class AnthropicClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    def send(self, messages, system, model="claude-3-5-sonnet-20240620",
-             max_tokens=4000, temperature=1.0):
+    def send(
+        self,
+        messages,
+        system,
+        model="claude-3-5-sonnet-20240620",
+        max_tokens=512,          # ✅ БЫЛО 4000 → СТАЛО 512
+        temperature=1.0,
+    ):
 
         headers = {
             "x-api-key": self.api_key,
